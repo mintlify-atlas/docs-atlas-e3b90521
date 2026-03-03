@@ -1,0 +1,69 @@
+{
+  "projectType": "saas",
+  "projectName": "jøsh",
+  "projectDescription": "AI-powered dating service that eliminates swiping and small talk through personalized matchmaking and automated date coordination via SMS",
+  "theme": "palm",
+  "primaryColor": "#1d4ed8",
+  "lightColor": "#90A9F1",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["introduction", "how-it-works"]
+          },
+          {
+            "group": "User Guide",
+            "pages": ["user-guide/getting-started", "user-guide/onboarding", "user-guide/matching", "user-guide/date-coordination"]
+          },
+          {
+            "group": "Admin Guide",
+            "pages": ["admin-guide/overview", "admin-guide/user-review", "admin-guide/pairing", "admin-guide/monitoring"]
+          }
+        ]
+      },
+      {
+        "tab": "Technical",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": ["technical/architecture", "technical/database-schema", "technical/api-endpoints"]
+          },
+          {
+            "group": "Core Systems",
+            "pages": ["technical/profile-structuring", "technical/scheduling-system", "technical/sms-integration", "technical/ai-models"]
+          },
+          {
+            "group": "Development",
+            "pages": ["technical/setup", "technical/environment-variables", "technical/deployment"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "SMS-based user onboarding with conversational profile collection",
+    "AI-powered profile structuring and badge extraction",
+    "Manual matchmaking with admin review interface",
+    "Automated date scheduling with time negotiation via SMS",
+    "Real-time message relay between matched users",
+    "Photo upload and identity verification with driver's license parsing",
+    "AI-driven venue recommendations based on user profiles"
+  ],
+  "publicApiSurface": [
+    "POST /api/tpo/signup - User signup endpoint",
+    "POST /api/tpo/webhook - SMS webhook handler",
+    "GET /api/tpo/admin/users - List users by status",
+    "POST /api/tpo/admin/review - Approve/reject users",
+    "POST /api/tpo/admin/pair - Create date pairs",
+    "POST /api/tpo/admin/user-action - Admin user actions",
+    "GET /api/tpo/admin/dates - List active dates",
+    "POST /api/tpo/admin/end-date - End a date",
+    "GET /api/tpo/admin/messages - Fetch date messages",
+    "POST /api/tpo/admin/signed-url - Generate signed photo URLs",
+    "POST /api/tpo/admin/schedule-sim - Schedule simulation"
+  ]
+}
