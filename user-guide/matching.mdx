@@ -1,0 +1,193 @@
+---
+title: How matching works
+description: Manual matchmaking by real humans
+icon: heart
+---
+
+jøsh uses manual matchmaking — real people carefully review profiles and create pairs based on compatibility. No algorithms, no swiping, no endless scrolling.
+
+## The matching process
+
+<Steps>
+  <Step title="Application review">
+    After you complete onboarding, your profile goes to the admin review queue where matchmakers:
+    
+    - Review your photos for quality and authenticity
+    - Verify your driver's license information
+    - Check that your answers are substantive and complete
+    - Look for red flags or incomplete profiles
+    
+    See [User Review](/admin-guide/user-review) for details on the admin review process.
+  </Step>
+  
+  <Step title="Approval decision">
+    Matchmakers approve or reject your application based on:
+    
+    - Photo quality (clear, recent, appropriate)
+    - Profile completeness (all questions answered thoughtfully)
+    - ID verification success
+    - Age appropriateness (18+)
+    - No red flags (inappropriate content, fake profiles, etc.)
+    
+    <Info>
+    If approved, you'll receive: "good news - you're accepted to jøsh! we'll text when we've found a great match for you."
+    </Info>
+    
+    <Warning>
+    If rejected: "thanks for applying to jøsh. unfortunately we're not able to accept your application at this time."
+    </Warning>
+  </Step>
+  
+  <Step title="Waiting for a match">
+    Once approved, your profile enters the pairing pool. Matchmakers actively review approved users to find compatible pairs.
+    
+    **What matchmakers look for**:
+    - Geographic proximity (same city)
+    - Age compatibility (within stated preferences)
+    - Gender/sexuality alignment
+    - Relationship intent match (both want long-term, both open to casual, etc.)
+    - Shared values and interests
+    - No dealbreakers
+    - Must-haves alignment
+  </Step>
+  
+  <Step title="Getting paired">
+    When a matchmaker creates a pair, both people receive a text notification:
+    
+    <Info>
+    "you've been matched! any messages you send to this number will be forwarded to your match. have fun getting to know each other!"
+    </Info>
+    
+    At this point:
+    - You can start messaging directly
+    - The automated scheduling system begins coordinating a date time
+    - Messages are relayed through jøsh (your real number stays private)
+  </Step>
+</Steps>
+
+## What makes a good match
+
+Matchmakers use structured profile data to evaluate compatibility:
+
+### Demographics
+- **Age**: Within both people's stated preferences
+- **Location**: Same city for in-person dates
+- **Gender/sexuality**: Mutual attraction alignment
+- **Height**: If either person has preferences
+
+### Intent and values
+- **Relationship goals**: Both want the same thing (long-term, casual, etc.)
+- **Religion**: Compatibility on religious views if important to either person
+- **Politics**: Alignment if either person specified it matters
+- **Kids**: Compatible on having/wanting children
+
+### Lifestyle
+- **Drinking/smoking**: No dealbreaker conflicts
+- **Social energy**: Introverts with introverts, extroverts with extroverts, or compatible mixes
+- **Activity level**: Similar energy for hobbies and adventures
+- **Work/ambition**: Compatible career focus and ambition levels
+
+### Personality
+- **Humor style**: Complementary or matching
+- **Communication style**: Direct with direct, etc.
+- **Planning style**: Spontaneous vs. planners
+- **Conflict style**: Compatible approaches to disagreements
+
+## Profile badges
+
+Your free-text answers are converted into structured "badges" that capture key attributes. For example:
+
+**About badges**:
+- "software engineer" (work)
+- "social drinker" (drinking)
+- "introverted" (vibe)
+- "rock climbing" (hobby)
+- "wants kids eventually" (kids)
+
+**Preference badges**:
+- "25-32" (age range)
+- "ambitious" (personality trait)
+- "no smoking" (dealbreaker)
+- "shared political views" (values)
+- "athletic build" (physical preference)
+
+Matchmakers can see these badges at a glance to quickly assess compatibility.
+
+See [Profile Structuring](/technical/profile-structuring) for technical details on badge extraction.
+
+## Why manual matching
+
+Manual matching has several advantages over algorithmic matching:
+
+<CardGroup cols={2}>
+  <Card title="Nuanced judgment" icon="brain">
+    Humans pick up on subtleties that algorithms miss — tone, values, personality fit.
+  </Card>
+  
+  <Card title="Quality over quantity" icon="star">
+    You get carefully selected matches, not endless options that overwhelm you.
+  </Card>
+  
+  <Card title="No gaming the system" icon="shield">
+    Can't optimize your profile for an algorithm. Just be yourself.
+  </Card>
+  
+  <Card title="Human accountability" icon="user-check">
+    Real people review for safety, authenticity, and appropriateness.
+  </Card>
+</CardGroup>
+
+## How long does matching take
+
+Matching speed depends on:
+- **Pool size**: How many approved users are in your city
+- **Your preferences**: Narrower criteria = longer wait
+- **Matchmaker capacity**: How many pairs are being created weekly
+
+There's no guaranteed timeline, but most users hear back within 1-2 weeks of approval.
+
+<Tip>
+The more thoughtful and detailed your profile, the easier it is for matchmakers to find you a great match.
+</Tip>
+
+## What happens when you match
+
+Once paired:
+
+1. **Messaging portal opens**: You can text back and forth through jøsh
+2. **Scheduling begins**: The automated system starts coordinating a date time (see [Date Coordination](/user-guide/date-coordination))
+3. **Venue suggestion**: After agreeing on a time, you'll get an AI-powered venue recommendation
+4. **Go on the date**: Meet in person at the suggested place and time
+
+## Match lifecycle
+
+A match can end in a few ways:
+- **Admin ends it**: Matchmakers can manually end a match if needed
+- **Scheduling fails**: If you can't agree on a time after multiple attempts
+- **After the date**: Once you've met, the portal typically closes
+
+<Info>
+When a match ends, you'll receive: "your current match conversation has ended. we'll let you know when we have another great match for you!"
+</Info>
+
+## Getting matched again
+
+After one match ends, you go back into the pairing pool. You don't need to re-apply or update anything (unless you want to).
+
+<CardGroup cols={2}>
+  <Card title="Onboarding" icon="clipboard-question" href="/user-guide/onboarding">
+    Review the questions you answered
+  </Card>
+  
+  <Card title="Date coordination" icon="calendar" href="/user-guide/date-coordination">
+    Learn how scheduling works
+  </Card>
+  
+  <Card title="Admin pairing" icon="users-gear" href="/admin-guide/pairing">
+    See how admins create matches
+  </Card>
+  
+  <Card title="Database schema" icon="database" href="/technical/database-schema">
+    View the TpoDate model structure
+  </Card>
+</CardGroup>

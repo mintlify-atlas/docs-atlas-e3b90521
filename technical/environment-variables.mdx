@@ -1,0 +1,243 @@
+---
+title: 'Environment Variables'
+description: 'Complete reference for jøsh environment variables'
+icon: 'key'
+---
+
+## Overview
+
+jøsh requires several environment variables to function properly. Create a `.env` file in the project root and configure the following variables.
+
+<Warning>
+  Never commit `.env` files to version control. All `.env*` files are gitignored by default.
+</Warning>
+
+## Required Variables
+
+### Database Configuration
+
+PostgreSQL database connection strings for Prisma.
+
+<CodeGroup>
+```bash .env
+DATABASE_URL="postgresql://user:password@host:port/database"
+DIRECT_URL="postgresql://user:password@host:port/database"
+```
+</CodeGroup>
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string with connection pooling support |
+| `DIRECT_URL` | Direct PostgreSQL connection string (without pooling) for migrations |
+
+<Info>
+  When using services like Supabase or Neon, `DATABASE_URL` typically uses connection pooling (port 6543), while `DIRECT_URL` connects directly (port 5432).
+</Info>
+
+### AI Gateway Configuration
+
+API key for AI service integrations (OpenAI, Mistral).
+
+```bash
+AI_GATEWAY_API_KEY="your-api-key-here"
+```
+
+| Variable | Description | Used By |
+|----------|-------------|----------|
+| `AI_GATEWAY_API_KEY` | API key for AI services | Profile structuring, onboarding, scheduling, photo tagging, ID extraction |
+
+<Warning>
+  Missing `AI_GATEWAY_API_KEY` will cause AI-powered features to fail, including TPO onboarding and profile generation.
+</Warning>
+
+Used in:
+- `src/lib/tpoScheduling.ts:36`
+- `src/lib/tpoPhotoTags.ts:23`
+- `src/lib/tpoOnboardingAdlib.ts:24`
+- `src/lib/tpoAnswerQuality.ts:131`
+- `src/lib/profileStructuring.ts:346`
+- `src/lib/onboardingGaps.ts:39`
+- `src/lib/dlExtract.ts:104`
+
+### Surge SMS Configuration
+
+Surge API credentials for SMS messaging functionality.
+
+```bash
+SURGE_API_KEY="your-surge-api-key"
+SURGE_ACCOUNT_ID="your-surge-account-id"
+SURGE_WEBHOOK_SECRET="your-webhook-secret"
+```
+
+| Variable | Description | Required For |
+|----------|-------------|---------------|
+| `SURGE_API_KEY` | Surge API authentication key | Sending SMS messages |
+| `SURGE_ACCOUNT_ID` | Your Surge account identifier | SMS API requests |
+| `SURGE_WEBHOOK_SECRET` | Secret for validating webhook signatures | Webhook security |
+
+<Info>
+  The Surge SMS integration is used for the TPO (dating) feature to communicate with users via text message.
+</Info>
+
+Used in:
+- `src/lib/surgeSend.ts:5`
+- `src/lib/surgeWebhook.ts:3`
+- `src/app/api/tpo/webhook/route.ts:78`
+
+### Supabase Configuration
+
+Supabase credentials for file storage and authentication.
+
+```bash
+SUPABASE_PROJECT_URL="https://your-project.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+SUPABASE_UPLOAD_BUCKET="tpo-uploads"
+```
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `SUPABASE_PROJECT_URL` | Your Supabase project URL | - |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (admin access) | - |
+| `SUPABASE_UPLOAD_BUCKET` | Bucket name for file uploads | `tpo-uploads` |
+
+<Warning>
+  The service role key has admin privileges. Never expose it in client-side code.
+</Warning>
+
+Used in:
+- `src/app/api/tpo/webhook/route.ts:31`
+- `src/app/api/tpo/admin/signed-url/route.ts:9`
+
+### Internal API Authentication
+
+API key for internal service authentication.
+
+```bash
+MUTUAL_INTERNAL_API_KEY="your-internal-api-key"
+```
+
+| Variable | Description |
+|----------|-------------|
+| `MUTUAL_INTERNAL_API_KEY` | Secret key for authenticating internal API requests |
+
+Used in:
+- `src/lib/internalApiAuth.ts:4`
+
+## Optional Variables
+
+### Development Environment
+
+```bash
+NODE_ENV="development"
+```
+
+| Variable | Description | Values |
+|----------|-------------|--------|
+| `NODE_ENV` | Application environment mode | `development`, `production`, `test` |
+
+<Info>
+  Next.js automatically sets `NODE_ENV` during build and development. You typically don't need to set this manually.
+</Info>
+
+### Webhook Validation (Development)
+
+```bash
+SURGE_SKIP_WEBHOOK_VALIDATION="true"
+```
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `SURGE_SKIP_WEBHOOK_VALIDATION` | Skip webhook signature validation (dev only) | `false` |
+
+<Warning>
+  Only use `SURGE_SKIP_WEBHOOK_VALIDATION=true` in local development. Never skip validation in production.
+</Warning>
+
+## Environment-Specific Configuration
+
+### Local Development
+
+Example `.env` file for local development:
+
+```bash
+# Database
+DATABASE_URL="postgresql://postgres:password@localhost:5432/jmash"
+DIRECT_URL="postgresql://postgres:password@localhost:5432/jmash"
+
+# AI Services
+AI_GATEWAY_API_KEY="sk-..."
+
+# Surge SMS
+SURGE_API_KEY="surge_..."
+SURGE_ACCOUNT_ID="acc_..."
+SURGE_WEBHOOK_SECRET="whsec_..."
+
+# Supabase
+SUPABASE_PROJECT_URL="https://xxxxx.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="eyJ..."
+SUPABASE_UPLOAD_BUCKET="tpo-uploads"
+
+# Internal
+MUTUAL_INTERNAL_API_KEY="internal_..."
+
+# Development
+SURGE_SKIP_WEBHOOK_VALIDATION="true"
+```
+
+### Production (Vercel)
+
+For production deployment on Vercel:
+
+1. Navigate to your project settings
+2. Go to **Environment Variables**
+3. Add all required variables
+4. Set appropriate values for production environments
+
+<Info>
+  Vercel automatically injects environment variables during build and runtime. Use the Vercel dashboard to manage production secrets.
+</Info>
+
+## Validation
+
+The application validates required environment variables at runtime. Missing critical variables will throw errors:
+
+```typescript
+if (!process.env.AI_GATEWAY_API_KEY) {
+  throw new Error("Missing AI_GATEWAY_API_KEY");
+}
+```
+
+<Warning>
+  Check your application logs during startup to catch any missing or misconfigured environment variables.
+</Warning>
+
+## Security Best Practices
+
+<Steps>
+  <Step title="Use different credentials for each environment">
+    Maintain separate API keys and database credentials for development, staging, and production.
+  </Step>
+
+  <Step title="Rotate secrets regularly">
+    Periodically update API keys and webhook secrets, especially after team member changes.
+  </Step>
+
+  <Step title="Restrict service role keys">
+    Use Supabase RLS (Row Level Security) policies even with service role keys when possible.
+  </Step>
+
+  <Step title="Monitor for exposed secrets">
+    Use tools like GitHub secret scanning to detect accidentally committed credentials.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Setup" icon="code" href="/technical/setup">
+    Set up your local development environment
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/technical/deployment">
+    Deploy jøsh to production
+  </Card>
+</CardGroup>

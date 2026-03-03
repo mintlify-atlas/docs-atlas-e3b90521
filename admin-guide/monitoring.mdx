@@ -1,0 +1,401 @@
+---
+title: Monitoring Dates and Conversations
+description: How to track active dates, view messages, and identify issues
+---
+
+The monitoring workflow allows admins to oversee active dates, inspect message exchanges, and intervene when necessary.
+
+## Accessing Date Conversations
+
+There are two ways to view date conversations:
+
+<Tabs>
+  <Tab title="From Pairing Tab">
+    <Steps>
+      <Step title="Navigate to Pairing tab">
+        Scroll to the **Active Dates** section below available users
+      </Step>
+      
+      <Step title="Click eye icon">
+        Click the eye icon on any date card
+      </Step>
+      
+      <Step title="Conversation modal opens">
+        Displays dual phone panel view with full message history
+      </Step>
+    </Steps>
+  </Tab>
+  
+  <Tab title="Via API">
+    Fetch messages programmatically:
+    
+    ```typescript
+    GET /api/tpo/admin/messages?dateId={dateId}
+    Headers: { 'x-internal-api-key': string }
+    
+    Response: {
+      messages: [
+        {
+          id: string
+          createdAt: string
+          fromPhone: string
+          toPhone: string
+          body: string
+          blocked: boolean
+        }
+      ]
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Conversation Modal
+
+The conversation modal displays a **dual phone panel** interface:
+
+### Left Panel: User A
+- Messages sent by User A appear as **user bubbles** (blue)
+- Messages received (from User B or system) appear as **bot bubbles** (gray)
+- Phone number shown in header
+- Chronological message order
+
+### Right Panel: User B
+- Same structure, but from User B's perspective
+- Messages sent by User B appear as **user bubbles**
+- Messages received appear as **bot bubbles**
+
+This side-by-side view makes it easy to:
+- See how each user experiences the conversation
+- Identify delivery or timing issues
+- Verify scheduling coordination is clear to both parties
+- Detect conversation quality problems
+
+<Note>
+  The modal is read-only. Admins cannot send messages directly through this interface.
+</Note>
+
+## Message Data Structure
+
+Each message contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique message identifier |
+| `createdAt` | string | ISO timestamp |
+| `fromPhone` | string | Sender phone number (or "system") |
+| `toPhone` | string | Recipient phone number |
+| `body` | string | Message text content |
+| `blocked` | boolean | Whether message was filtered/blocked |
+
+### System Messages
+
+Messages with `fromPhone: "system"` indicate:
+- Scheduling proposals
+- Match notifications
+- Automated prompts
+
+Example:
+```json
+{
+  "fromPhone": "system",
+  "toPhone": "+15551234567",
+  "body": "let's get the date on the calendar. how does thursday at 7pm work for you?",
+  "blocked": false
+}
+```
+
+## Monitoring Active Dates
+
+### Date Card Information
+
+Each active date card shows:
+
+- **User avatars**: Overlapping circular profile photos
+- **User names**: "Alice & Bob" format (from `dlName`)
+- **Message count**: Total messages exchanged (useful for engagement tracking)
+- **Creation date**: When the pair was created
+- **Actions**: View conversation, end date
+
+### Key Metrics to Monitor
+
+<CardGroup cols={2}>
+  <Card title="Message Count" icon="message">
+    Low message counts may indicate:
+    - Users haven't started conversing
+    - Scheduling stuck
+    - Technical delivery issues
+  </Card>
+  
+  <Card title="Conversation Recency" icon="clock">
+    Check `createdAt` of latest message:
+    - Stale conversations (>48 hours) may need intervention
+    - Active exchanges indicate healthy engagement
+  </Card>
+  
+  <Card title="Blocked Messages" icon="ban">
+    Messages with `blocked: true` indicate:
+    - Profanity filter triggered
+    - Inappropriate content detected
+    - May require admin review
+  </Card>
+  
+  <Card title="Scheduling Progress" icon="calendar">
+    Look for scheduling coordination:
+    - Time proposals from system
+    - User confirmations
+    - Finalized date/time
+  </Card>
+</CardGroup>
+
+## Identifying Issues
+
+### Stalled Scheduling
+
+**Symptoms:**
+- Few messages after match creation
+- System proposed time, but no user response
+- Back-and-forth without resolution
+
+**Investigation:**
+1. Open conversation modal
+2. Check if User A responded to initial proposal
+3. Verify system generated follow-up prompts
+4. Look for user confusion or technical errors
+
+**Possible Actions:**
+- End the date if unresponsive for >1 week
+- Check SMS delivery logs (outside admin panel)
+- Verify scheduling logic is working correctly
+
+### One-Sided Conversation
+
+**Symptoms:**
+- One user sending messages, other silent
+- System messages sent but no replies
+
+**Investigation:**
+1. Check if SMS delivery failed (requires backend logs)
+2. Verify both users' phone numbers are valid
+3. Review last message timestamps
+
+**Possible Actions:**
+- End date and notify active user
+- Re-pair engaged user with new match
+
+### Inappropriate Content
+
+**Symptoms:**
+- `blocked: true` on messages
+- Reported issues from users
+
+**Investigation:**
+1. Review blocked message content in modal
+2. Check conversation history context
+3. Determine if block was correct or false positive
+
+**Possible Actions:**
+- Ban user if content violates guidelines
+- End date immediately
+- Delete user account for serious violations
+
+## Ending Dates
+
+To terminate an active date:
+
+<Steps>
+  <Step title="Navigate to date card">
+    Find the date in the Active Dates section
+  </Step>
+  
+  <Step title="Click 'end' button">
+    Confirmation not required (action is immediate)
+  </Step>
+  
+  <Step title="Date status updates">
+    - Status changes to `ENDED`
+    - `endedAt` timestamp set
+    - Both users return to available pool
+    - Conversation portal disabled for users
+  </Step>
+</Steps>
+
+```typescript
+POST /api/tpo/admin/end-date
+Headers: { 'x-internal-api-key': string }
+Body: { dateId: string }
+
+Response: { success: true }
+```
+
+<Warning>
+  Ending a date does NOT send notifications to users. Consider sending manual SMS if you want to explain the termination.
+</Warning>
+
+## Date Lifecycle Monitoring
+
+### Stage 1: Scheduling (0-48 hours)
+
+**Expected behavior:**
+- System sends initial time proposal to User A
+- User A responds with acceptance or counter-proposal
+- System coordinates with User B
+- Date/time finalized
+
+**Red flags:**
+- No response from User A within 24 hours
+- Multiple counter-proposals without resolution
+- Confusion about date location or format
+
+### Stage 2: Pre-Date Conversation (1-7 days)
+
+**Expected behavior:**
+- Light conversation to build rapport
+- Confirmation reminders as date approaches
+- Logistics coordination (meeting place, etc.)
+
+**Red flags:**
+- Complete silence after scheduling
+- One user dominating conversation
+- Inappropriate or aggressive messages
+
+### Stage 3: Post-Date (After scheduled time)
+
+**Expected behavior:**
+- Portal may remain open for feedback
+- Users may exchange follow-up messages
+- Date typically ends naturally or admin closes
+
+**Red flags:**
+- Negative feedback reported
+- Requests to end early
+- Blocked messages spike
+
+## User Actions During Active Dates
+
+Admins can still take user-level actions on paired users:
+
+### Ban User in Active Date
+
+```typescript
+POST /api/tpo/admin/user-action
+Body: { userId: string, action: "ban" }
+```
+
+**Consequences:**
+- User status → `BANNED`
+- **Active date automatically ended**
+- Other user returns to available pool
+- Banned user moved to Blocked tab
+
+### Delete User in Active Date
+
+```typescript
+POST /api/tpo/admin/user-action
+Body: { userId: string, action: "delete" }
+```
+
+**Consequences:**
+- All messages deleted
+- All dates (including active) deleted
+- User record removed
+- Phone can re-register fresh
+
+<Warning>
+  Deleting a user in an active date will orphan the conversation for the other user. Consider ending the date first, then deleting.
+</Warning>
+
+## Monitoring Best Practices
+
+<AccordionGroup>
+  <Accordion title="Daily Check-in">
+    Review active dates daily:
+    - Check message counts for engagement
+    - Identify stalled scheduling flows
+    - Look for blocked messages
+    - End dates older than 2 weeks with no activity
+  </Accordion>
+  
+  <Accordion title="Blocked Message Review">
+    When you see `blocked: true`:
+    - Read full context in conversation modal
+    - Determine if filter was appropriate
+    - Take action on user if content violates guidelines
+    - Adjust profanity filter rules if needed (backend)
+  </Accordion>
+  
+  <Accordion title="User Feedback Integration">
+    If users report issues:
+    - Pull up conversation in admin panel
+    - Verify technical delivery (backend logs)
+    - Check for patterns across multiple dates
+    - Document issues for engineering team
+  </Accordion>
+  
+  <Accordion title="Privacy Considerations">
+    Conversation data is sensitive:
+    - Only access when necessary for support or safety
+    - Do not share conversation content externally
+    - Document reason for accessing user data
+    - Follow data retention policies
+  </Accordion>
+</AccordionGroup>
+
+## API Reference
+
+### Fetch Date Messages
+
+```typescript
+GET /api/tpo/admin/messages?dateId={dateId}
+Headers: { 'x-internal-api-key': string }
+
+Response: {
+  messages: TpoDateMessage[]
+}
+```
+
+Messages are sorted by `createdAt` ascending (oldest first).
+
+### Fetch All Active Dates
+
+```typescript
+GET /api/tpo/admin/dates?status=ACTIVE
+Headers: { 'x-internal-api-key': string }
+
+Response: {
+  dates: [
+    {
+      id: string
+      status: "ACTIVE"
+      portalEnabled: boolean
+      createdAt: string
+      userA: { id, phoneNumber, photoUrls, dlName, ... }
+      userB: { id, phoneNumber, photoUrls, dlName, ... }
+      _count: { messages: number }
+    }
+  ]
+}
+```
+
+### End Date
+
+```typescript
+POST /api/tpo/admin/end-date
+Headers: { 'x-internal-api-key': string }
+Body: { dateId: string }
+
+Response: { success: true }
+```
+
+Sets `status: "ENDED"` and `endedAt` timestamp.
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Create Pairings" href="/admin-guide/pairing" icon="users">
+    Learn how to match users
+  </Card>
+  
+  <Card title="User Review" href="/admin-guide/user-review" icon="clipboard-check">
+    Approve applications before pairing
+  </Card>
+</CardGroup>

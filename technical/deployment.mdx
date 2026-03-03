@@ -1,0 +1,379 @@
+---
+title: 'Deployment Guide'
+description: 'Deploy jøsh to production on Vercel'
+icon: 'rocket'
+---
+
+## Overview
+
+jøsh is designed to be deployed on **Vercel**, taking advantage of serverless functions, edge networking, and seamless Next.js integration.
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+- A **Vercel account** ([sign up here](https://vercel.com/signup))
+- A **PostgreSQL database** (Supabase, Neon, Railway, etc.)
+- All required **environment variables** configured
+- **Git repository** connected to Vercel
+
+## Deployment Methods
+
+### Method 1: Vercel Git Integration (Recommended)
+
+<Steps>
+  <Step title="Connect your repository">
+    1. Log in to [Vercel](https://vercel.com)
+    2. Click **"Add New Project"**
+    3. Import your Git repository (GitHub, GitLab, or Bitbucket)
+    4. Select the repository containing jøsh
+  </Step>
+
+  <Step title="Configure project settings">
+    Vercel will auto-detect Next.js. Verify the following settings:
+
+    | Setting | Value |
+    |---------|-------|
+    | **Framework Preset** | Next.js |
+    | **Build Command** | `npm run vercel-build` |
+    | **Output Directory** | `.next` |
+    | **Install Command** | `npm install` |
+
+    <Info>
+      The `vercel-build` script runs `prisma generate && next build` to ensure Prisma client is generated before building.
+    </Info>
+  </Step>
+
+  <Step title="Add environment variables">
+    In the Vercel project settings, navigate to **Environment Variables** and add:
+
+    - `DATABASE_URL`
+    - `DIRECT_URL`
+    - `AI_GATEWAY_API_KEY`
+    - `SURGE_API_KEY`
+    - `SURGE_ACCOUNT_ID`
+    - `SURGE_WEBHOOK_SECRET`
+    - `SUPABASE_PROJECT_URL`
+    - `SUPABASE_SERVICE_ROLE_KEY`
+    - `SUPABASE_UPLOAD_BUCKET`
+    - `MUTUAL_INTERNAL_API_KEY`
+
+    <Warning>
+      Use production credentials, not development values. See [Environment Variables](/technical/environment-variables) for details.
+    </Warning>
+  </Step>
+
+  <Step title="Deploy">
+    Click **"Deploy"** to trigger your first deployment.
+
+    Vercel will:
+    1. Clone your repository
+    2. Install dependencies
+    3. Generate Prisma client
+    4. Build the Next.js application
+    5. Deploy to production
+  </Step>
+</Steps>
+
+### Method 2: Vercel CLI
+
+Deploy directly from your local machine using the Vercel CLI.
+
+<Steps>
+  <Step title="Install Vercel CLI">
+    <CodeGroup>
+      ```bash npm
+      npm install -g vercel
+      ```
+
+      ```bash yarn
+      yarn global add vercel
+      ```
+
+      ```bash pnpm
+      pnpm add -g vercel
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Login to Vercel">
+    ```bash
+    vercel login
+    ```
+  </Step>
+
+  <Step title="Deploy to production">
+    From the project root:
+
+    ```bash
+    vercel --prod
+    ```
+
+    Follow the prompts to configure your deployment.
+  </Step>
+</Steps>
+
+## Database Migrations
+
+### Initial Setup
+
+After your first deployment, run database migrations:
+
+<Steps>
+  <Step title="Generate Prisma client locally">
+    ```bash
+    npm run db:generate
+    ```
+  </Step>
+
+  <Step title="Apply migrations to production database">
+    <Warning>
+      Ensure your `DATABASE_URL` points to your production database before running migrations.
+    </Warning>
+
+    ```bash
+    npx prisma migrate deploy
+    ```
+
+    This applies all pending migrations without creating new ones.
+  </Step>
+</Steps>
+
+### Subsequent Migrations
+
+When updating the database schema:
+
+1. **Development**: Create and test migrations locally
+   ```bash
+   npm run db:migrate
+   ```
+
+2. **Production**: Deploy schema changes
+   ```bash
+   npx prisma migrate deploy
+   ```
+
+<Info>
+  For zero-downtime deployments with schema changes, consider using Prisma's [expand/contract pattern](https://www.prisma.io/docs/guides/database/deployment).
+</Info>
+
+## Build Configuration
+
+### Custom Build Script
+
+The `vercel-build` script ensures Prisma client generation before build:
+
+```json package.json
+{
+  "scripts": {
+    "vercel-build": "prisma generate && next build"
+  }
+}
+```
+
+This prevents "Prisma client not found" errors during deployment.
+
+### PostHog Integration
+
+The application includes PostHog analytics with custom rewrites for first-party data collection:
+
+```typescript next.config.ts
+async rewrites() {
+  return [
+    {
+      source: "/ingest/static/:path*",
+      destination: "https://us-assets.i.posthog.com/static/:path*",
+    },
+    {
+      source: "/ingest/:path*",
+      destination: "https://us.i.posthog.com/:path*",
+    },
+  ];
+}
+```
+
+<Info>
+  These rewrites proxy PostHog requests through your domain, improving data collection reliability.
+</Info>
+
+## Environment-Specific Configuration
+
+Vercel supports multiple environments:
+
+- **Production**: Deployed from `main`/`master` branch
+- **Preview**: Deployed from pull requests and other branches
+- **Development**: Local environment
+
+Configure environment variables for each environment in Vercel dashboard:
+
+| Environment | Use Case |
+|-------------|----------|
+| **Production** | Live production deployment |
+| **Preview** | Staging/testing for pull requests |
+| **Development** | Local development (use `.env` file) |
+
+## Monitoring & Debugging
+
+### Vercel Logs
+
+View deployment logs and runtime errors:
+
+1. Navigate to your project in Vercel
+2. Click **"Deployments"**
+3. Select a deployment
+4. View **Build Logs** and **Function Logs**
+
+### Common Deployment Issues
+
+#### Prisma Client Not Found
+
+**Cause**: Prisma client not generated during build
+
+**Solution**: Ensure `vercel-build` script includes `prisma generate`
+
+```json
+"vercel-build": "prisma generate && next build"
+```
+
+#### Database Connection Errors
+
+**Cause**: Incorrect `DATABASE_URL` or connection pooling issues
+
+**Solution**: 
+- Verify `DATABASE_URL` format
+- Use connection pooling URL for `DATABASE_URL`
+- Use direct connection URL for `DIRECT_URL`
+
+#### Environment Variables Not Available
+
+**Cause**: Variables not set in Vercel dashboard
+
+**Solution**: Add missing variables in **Project Settings → Environment Variables**
+
+<Warning>
+  After adding environment variables, redeploy your application to apply changes.
+</Warning>
+
+## Continuous Deployment
+
+With Vercel Git integration, deployments are automatic:
+
+1. **Push to branch** → Creates preview deployment
+2. **Merge to main** → Deploys to production
+3. **Open pull request** → Generates preview URL
+
+### Deployment Protection
+
+Enable deployment protection for production:
+
+1. Go to **Project Settings → Deployment Protection**
+2. Enable **Vercel Authentication** for production
+3. Restrict access to team members only
+
+## Performance Optimization
+
+### Image Optimization
+
+jøsh uses Next.js Image optimization with configured remote patterns:
+
+```typescript next.config.ts
+images: {
+  remotePatterns: [
+    {
+      protocol: "https",
+      hostname: "lh3.googleusercontent.com",
+      port: "",
+      pathname: "/d/**",
+    },
+  ],
+}
+```
+
+### Caching Strategy
+
+Vercel automatically caches:
+- Static assets (images, CSS, JS)
+- API responses with proper cache headers
+- Edge functions for low-latency responses
+
+## Rollback & Version Control
+
+Rollback to a previous deployment:
+
+1. Navigate to **Deployments** in Vercel
+2. Find the stable deployment
+3. Click **"..."** → **"Promote to Production"**
+
+<Info>
+  Instant rollback allows you to revert to any previous deployment without redeploying code.
+</Info>
+
+## Custom Domains
+
+Add a custom domain to your Vercel deployment:
+
+<Steps>
+  <Step title="Add domain in Vercel">
+    1. Go to **Project Settings → Domains**
+    2. Enter your domain name
+    3. Click **"Add"**
+  </Step>
+
+  <Step title="Configure DNS">
+    Add the DNS records provided by Vercel:
+
+    | Type | Name | Value |
+    |------|------|-------|
+    | A | @ | 76.76.21.21 |
+    | CNAME | www | cname.vercel-dns.com |
+  </Step>
+
+  <Step title="Verify domain">
+    Vercel will automatically verify and provision SSL certificates.
+  </Step>
+</Steps>
+
+## Webhooks & API Routes
+
+### Surge SMS Webhook
+
+Configure your Surge webhook URL to point to your production deployment:
+
+```
+https://your-domain.vercel.app/api/tpo/webhook
+```
+
+<Info>
+  Update webhook URLs in your Surge SMS dashboard after each domain change.
+</Info>
+
+## Security Considerations
+
+<Steps>
+  <Step title="Environment variable security">
+    - Use Vercel's encrypted environment variables
+    - Never commit secrets to Git
+    - Rotate API keys regularly
+  </Step>
+
+  <Step title="Webhook validation">
+    Ensure `SURGE_WEBHOOK_SECRET` is set to validate incoming webhooks.
+  </Step>
+
+  <Step title="Database access">
+    - Restrict database access to Vercel IP ranges if possible
+    - Use SSL/TLS for database connections
+    - Enable connection pooling for serverless functions
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Setup" icon="code" href="/technical/setup">
+    Set up jøsh locally for development
+  </Card>
+  <Card title="Environment Variables" icon="key" href="/technical/environment-variables">
+    Configure required environment variables
+  </Card>
+</CardGroup>

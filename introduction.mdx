@@ -1,0 +1,127 @@
+---
+title: Introduction
+description: Meet jøsh - the AI-powered dating service that eliminates swiping, small talk, and overthinking
+---
+
+## Welcome to jøsh
+
+jøsh is an AI-powered dating service that removes the friction from modern dating. No swiping. No chit-chat. No overthinking. Just real matches, scheduled dates, and meaningful connections.
+
+<Note>
+  jøsh handles everything from matching to venue selection, so you can focus on the actual date.
+</Note>
+
+## How jøsh is different
+
+<CardGroup cols={2}>
+  <Card title="No swiping" icon="hand">
+    You don't browse profiles or swipe endlessly. Our team manually reviews applications and handpicks matches based on compatibility.
+  </Card>
+  
+  <Card title="No small talk" icon="comments">
+    Skip the awkward "hey what's up" phase. Once matched, our AI helps you schedule a date immediately.
+  </Card>
+  
+  <Card title="Automated scheduling" icon="calendar">
+    Our AI coordinates with both people via SMS to find a time that works, then suggests the perfect venue.
+  </Card>
+  
+  <Card title="Real identity verification" icon="id-card">
+    Every user submits a driver's license for verification. You'll know you're meeting a real person.
+  </Card>
+</CardGroup>
+
+## The jøsh experience
+
+<Steps>
+  <Step title="Sign up via SMS">
+    Enter your phone number on the jøsh website. You'll receive a text to start onboarding.
+  </Step>
+  
+  <Step title="Complete onboarding">
+    Answer 12 questions about yourself and what you're looking for, submit photos, and verify your identity with a driver's license photo.
+  </Step>
+  
+  <Step title="Manual review">
+    Our team reviews your application and either approves or declines it. If approved, you'll be notified via SMS.
+  </Step>
+  
+  <Step title="Get matched">
+    When we find a great match for you, you'll get a text saying "you've been matched!"
+  </Step>
+  
+  <Step title="Schedule your date">
+    Our AI works with both of you via SMS to find a time and date that works. It proposes options and coordinates back-and-forth until you both agree.
+  </Step>
+  
+  <Step title="Get venue recommendation">
+    Once you've both confirmed a time, our AI suggests a specific venue in your city based on both profiles.
+  </Step>
+  
+  <Step title="Chat before the date">
+    After scheduling, you can message your match directly through SMS. Messages are relayed between you.
+  </Step>
+</Steps>
+
+## Core features
+
+### Conversational onboarding
+
+You answer questions about yourself through natural SMS conversation. The AI asks follow-up questions if your answers need more detail, and provides personalized responses between questions to keep the experience engaging.
+
+Onboarding questions cover:
+- Gender and sexuality
+- Dating intentions (long-term, casual, or somewhere in between)
+- Work, education, and background
+- Languages and where you grew up
+- Kids, pets, and family plans
+- Lifestyle (drinking, smoking, substances)
+- Values alignment (religious and political views)
+- Partner preferences (vibe, energy, physical attributes)
+- Location
+
+### Photo and identity verification
+
+After answering questions, you submit at least 2 photos (one close-up and one full-body). Then you send a photo of your driver's license to verify your identity. Our AI extracts your name, age, and height from the license to ensure profile accuracy.
+
+### AI-powered scheduling
+
+Once matched, our AI manages the entire scheduling process:
+
+1. **Initial proposal**: User A gets a suggested date and time (e.g., "Saturday, March 8th at 7pm")
+2. **Back-and-forth coordination**: If someone can't make it, the AI asks for alternatives and checks with the other person
+3. **Intelligent clarification**: If a response is ambiguous, the AI asks follow-up questions
+4. **Date validation**: The AI ensures proposed dates are at least 2 days in the future
+5. **Venue suggestion**: Once both confirm, the AI suggests a specific real venue in your city based on both profiles
+
+### Direct messaging portal
+
+After your date is scheduled, any messages you send to the jøsh number are forwarded directly to your match. This lets you chat before meeting, all through SMS.
+
+## Who jøsh is for
+
+jøsh is designed for people who:
+- Are tired of swiping and want curated matches
+- Value efficiency and want dates scheduled quickly
+- Prefer text-based interactions over app interfaces
+- Want a more intentional dating experience
+- Are comfortable with manual curation and verification
+
+## Getting started
+
+To sign up for jøsh, visit the website and enter your phone number. You'll receive a text immediately with instructions to begin onboarding.
+
+<Note>
+  Currently, jøsh only supports US phone numbers (+1). Make sure to enable SMS on your device.
+</Note>
+
+## Technical foundation
+
+jøsh is built on:
+- **Next.js** for the web interface
+- **Prisma** and **PostgreSQL** for data management
+- **Supabase** for file storage (photos, IDs)
+- **Mistral AI** for conversational intelligence and scheduling analysis
+- **Surge** for SMS delivery and webhook handling
+
+All interactions happen via SMS, making jøsh accessible without requiring users to download an app or create an account on a platform.

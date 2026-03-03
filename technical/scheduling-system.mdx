@@ -1,0 +1,386 @@
+---
+title: "Scheduling System"
+description: "Automated date scheduling logic that negotiates date times via SMS with AI-powered conversation analysis"
+---
+
+## Overview
+
+The scheduling system orchestrates the entire flow from initial time proposal to confirmed date, handling multi-turn SMS negotiations between matched users. It uses Mistral AI to analyze natural language responses, detect acceptances vs. counterproposals, and enforce minimum lead time requirements.
+
+## Scheduling Phases
+
+The system progresses through a state machine with 5 distinct phases:
+
+```typescript
+type SchedulingPhase =
+  | "WAITING_FOR_A_REPLY"       // Initial proposal sent to User A
+  | "WAITING_FOR_A_ALTERNATIVE"  // A declined, needs to propose new time
+  | "WAITING_FOR_B_REPLY"       // Time forwarded to User B for approval
+  | "WAITING_FOR_B_ALTERNATIVE"  // B declined, needs to propose new time
+  | "AGREED";                   // Both confirmed, portal enabled
+```
+
+### Phase Transitions
+
+<Accordion title="Phase Flow Diagram">
+```
+WAITING_FOR_A_REPLY
+  ├─ A accepts → WAITING_FOR_B_REPLY
+  ├─ A proposes alternative → WAITING_FOR_B_REPLY (update proposedSlot)
+  └─ A declines without alternative → WAITING_FOR_A_ALTERNATIVE
+
+WAITING_FOR_A_ALTERNATIVE
+  └─ A proposes time → WAITING_FOR_B_REPLY
+
+WAITING_FOR_B_REPLY
+  ├─ B accepts → AGREED (generate venue, enable portal)
+  ├─ B proposes alternative → WAITING_FOR_A_REPLY (update proposedSlot)
+  └─ B declines without alternative → WAITING_FOR_A_ALTERNATIVE
+
+WAITING_FOR_B_ALTERNATIVE
+  └─ B proposes time → WAITING_FOR_A_REPLY
+
+AGREED
+  └─ Terminal state: messaging portal active
+```
+</Accordion>
+
+## Initial Time Proposal
+
+When a match is created, the system generates an initial date/time suggestion at least 2 days in the future:
+
+```typescript src/lib/tpoScheduling.ts
+export async function proposeInitialTimeSlot(params: {
+  today: Date;
+}): Promise<string> {
+  const { today } = params;
+  const minDate = addDays(today, 2);
+  const minDateStr = formatDateFriendly(minDate);
+  const fallback = formatDateFriendly(addDays(today, 3)) + " at 7pm";
+
+  const { text } = await generateText({
+    model: "mistral/mistral-medium",
+    prompt: `You are scheduling a first date for a dating app.
+
+Today is ${todayStr}.
+The earliest allowed date is ${minDateStr} (must be at least 2 full days from today).
+
+Suggest ONE specific date and time for a first date. Pick a weekend evening or weekday evening after work — something that naturally fits a casual first date.
+
+Rules:
+- The date must be on or after ${minDateStr}.
+- Return ONLY the date/time string. No explanation, no quotes.
+- Format example: "Saturday, March 8th at 7pm"`,
+    maxOutputTokens: 30,
+  });
+
+  const cleaned = text.trim().replace(/^["']|["']$/g, "");
+  if (cleaned.length > 5 && cleaned.length < 80) {
+    return cleaned;
+  }
+  return fallback;
+}
+```
+
+<Note>
+The AI generates natural-sounding time proposals like "Saturday, March 8th at 7pm" rather than rigid formats.
+</Note>
+
+## Response Analysis
+
+The core of the scheduling system is AI-powered response analysis that classifies user messages into three outcomes:
+
+### Analysis Schema
+
+```typescript src/lib/tpoScheduling.ts
+export interface SchedulingAnalysis {
+  accepted: boolean;               // User confirmed the proposed time
+  proposedAlternative: string | null;  // User suggested different time
+  tooSoon: boolean;                // Proposed date is less than 2 days away
+  needsClarification: boolean;     // Intent is ambiguous
+  clarificationQuestion: string | null;  // Follow-up to ask user
+}
+```
+
+### Analysis Prompt Strategy
+
+The analysis uses the full conversation history to resolve ambiguous references:
+
+```typescript src/lib/tpoScheduling.ts
+const analysis = await analyzeSchedulingResponse({
+  conversation: [
+    { role: "assistant", content: "does Saturday at 7pm work?" },
+    { role: "user", content: "can we do Friday instead?" },
+  ],
+  proposedSlot: "Saturday, March 8th at 7pm",
+  today: new Date(),
+});
+
+// Returns:
+// {
+//   accepted: false,
+//   proposedAlternative: "Friday, March 7th at 7pm",
+//   tooSoon: false,
+//   needsClarification: false,
+//   clarificationQuestion: null
+// }
+```
+
+### Three Outcomes
+
+<Accordion title="Outcome 1: Accepted">
+```typescript
+// User clearly agrees with no counter-suggestion
+Signal words: "yes", "yeah", "yep", "sure", "works", "sounds good", 
+              "that works", "perfect", "great", "ok", "okay"
+
+// Example:
+{ role: "user", content: "yeah that works for me!" }
+// → accepted: true
+```
+</Accordion>
+
+<Accordion title="Outcome 2: Alternative Proposed">
+```typescript
+// User suggests a different time (even if phrased positively)
+Signal phrases: "how about X", "what about X", "can we do X", 
+                "X works better", "X instead", "rather do X"
+
+// Example:
+{ role: "user", content: "how about 8pm instead?" }
+// → proposedAlternative: "Saturday, March 8th at 8pm"
+// → proposedDateYMD: "2026-03-08"
+
+// Relative date resolution:
+{ role: "user", content: "can we do next Friday?" }
+// Today = "Monday, March 3, 2026"
+// → proposedAlternative: "Friday, March 7th"
+// → proposedDateYMD: "2026-03-07"
+```
+</Accordion>
+
+<Accordion title="Outcome 3: Needs Clarification">
+```typescript
+// Intent is genuinely ambiguous
+
+// Example:
+{ role: "user", content: "hmm maybe" }
+// → needsClarification: true
+// → clarificationQuestion: "just to confirm — does that time work for you?"
+```
+</Accordion>
+
+## Date Validation (Too Soon)
+
+Dates must be at least 2 full days in the future. The system validates proposed alternatives:
+
+```typescript src/lib/tpoScheduling.ts
+let tooSoon = false;
+if (proposedDateYMD) {
+  const minDate = addDays(today, 2);
+  const minYMD = minDate.toISOString().slice(0, 10); // "YYYY-MM-DD"
+  tooSoon = proposedDateYMD < minYMD;
+}
+
+// If too soon, reject and ask for later date:
+if (analysis.tooSoon && analysis.proposedAlternative) {
+  await sendSms(
+    senderPhone,
+    `that's a bit soon — can you pick something after ${minDateStr}?`
+  );
+  return; // Don't advance phase
+}
+```
+
+## Conversation Context
+
+The AI receives full conversation history to resolve references like "Friday" or "7pm":
+
+```typescript src/app/api/tpo/webhook/route.ts
+// Load all prior messages for this date
+const pastMessages = await db.tpoMessage.findMany({
+  where: {
+    dateId: activeDate.id,
+    OR: [{ fromPhone: senderPhone }, { toPhone: senderPhone }],
+  },
+  orderBy: { createdAt: "asc" },
+});
+
+// Build conversation: past + current message
+const conversation = [
+  ...pastMessages.map((msg) => ({
+    role: msg.fromPhone === "system" ? "assistant" : "user",
+    content: msg.body,
+  })),
+  { role: "user", content: messageBody },
+];
+```
+
+<Note>
+Context resolution ensures "8pm instead" is understood as "Saturday, March 8th at 8pm" when Saturday was previously proposed.
+</Note>
+
+## Actor Validation
+
+Only the "expected actor" for each phase can advance state:
+
+```typescript src/app/api/tpo/webhook/route.ts
+const isUserA = activeDate.userA.phoneNumber === senderPhone;
+const phase = activeDate.schedulingPhase;
+
+const isExpectedActor =
+  (isUserA &&
+    (phase === "WAITING_FOR_A_REPLY" || phase === "WAITING_FOR_A_ALTERNATIVE")) ||
+  (!isUserA &&
+    (phase === "WAITING_FOR_B_REPLY" || phase === "WAITING_FOR_B_ALTERNATIVE"));
+
+if (!isExpectedActor) {
+  // Log message but don't advance state
+  await sendSms(senderPhone, "just checking with your match — hang tight!");
+  return;
+}
+```
+
+This prevents race conditions where both users reply simultaneously.
+
+## Date Spot Suggestion
+
+Once both users agree, the system generates a personalized venue suggestion:
+
+```typescript src/lib/tpoScheduling.ts
+export async function suggestDateSpot(params: {
+  userAProfile: object | null;
+  userBProfile: object | null;
+  city: string;
+  agreedTime: string;
+}): Promise<string> {
+  const { text } = await generateText({
+    model: "mistral/mistral-medium",
+    prompt: `You are suggesting a first date venue for two people on a dating app.
+
+City: ${city}
+Date/time: ${agreedTime}
+
+Person A's vibe: ${profileSummary(userAProfile)}
+Person B's vibe: ${profileSummary(userBProfile)}
+
+Suggest ONE real, specific establishment in ${city} that exists in real life and matches both people's energy.
+
+Rules:
+- Under 180 characters total
+- Must include the real venue name and a neighborhood/area
+- Do NOT suggest a generic vibe-only place (e.g., "a cozy bistro")
+- If uncertain about niche spots, pick a widely known real place in ${city}
+- End with a short reason it fits them both
+- Format: "[real venue name] in [neighborhood/area], [city] — [why it fits you both]"`,
+    maxOutputTokens: 80,
+  });
+
+  return text.trim();
+}
+```
+
+### Profile Summary for Venue Matching
+
+```typescript src/lib/tpoScheduling.ts
+function profileSummary(profile: object | null): string {
+  const relevant = {
+    hobbies: about?.hobbies,
+    activityLevel: about?.activityLevel,
+    fridayNight: about?.fridayNight,
+    drinking: about?.drinking,
+    planningStyle: about?.planningStyle,
+    lookingForNow: about?.lookingForNow,
+    mustHaves: prefs?.mustHaves,
+    datePlanningPreference: prefs?.datePlanningPreference,
+  };
+  return JSON.stringify(relevant);
+}
+```
+
+### Venue Validation
+
+The system validates that suggestions are specific venues, not generic categories:
+
+```typescript src/lib/tpoScheduling.ts
+function isSpecificVenueSuggestion(value: string): boolean {
+  // Must include "—" separator and "in" for location
+  if (!trimmed.includes("—") || !/\sin\s/i.test(venue)) return false;
+
+  // Reject generic phrases
+  const genericPhrases = [
+    "a cozy", "a casual", "a lively", "a rooftop",
+    "a coffee shop", "a wine bar", "a cocktail spot"
+  ];
+  if (genericPhrases.some((phrase) => lowerVenue.includes(phrase))) return false;
+
+  // Require at least one capitalized token (proper noun)
+  return /\b[A-Z][a-zA-Z0-9&'.-]*\b/.test(venue);
+}
+```
+
+If validation fails, the system retries with stricter constraints or returns a hardcoded fallback.
+
+## Final Confirmation
+
+When both users agree, the system updates the database and sends confirmations:
+
+```typescript src/app/api/tpo/webhook/route.ts
+if (analysis.accepted) {
+  const venue = await suggestDateSpot({
+    userAProfile: activeDate.userA.structuredProfile,
+    userBProfile: activeDate.userB.structuredProfile,
+    city: activeDate.userA.city ?? activeDate.userB.city ?? "your city",
+    agreedTime,
+  });
+
+  const confirmation = `you're both confirmed for ${agreedTime}!
+
+date spot: ${venue}
+
+any messages to this number now go straight to your match. have fun!`;
+
+  await db.tpoDate.update({
+    where: { id: activeDate.id },
+    data: {
+      schedulingPhase: "AGREED",
+      agreedTime,
+      suggestedPlace: venue,
+      portalEnabled: true,  // Enable message relay
+    },
+  });
+
+  // Send to both users
+  await sendSms(activeDate.userA.phoneNumber, confirmation);
+  await sendSms(activeDate.userB.phoneNumber, confirmation);
+}
+```
+
+## Configuration
+
+```bash
+AI_GATEWAY_API_KEY=your_key_here  # Required for Mistral API access
+```
+
+Without the API key, the system falls back to default behaviors:
+- Initial time: 3 days from today at 7pm
+- Analysis: Assumes acceptance (optimistic)
+
+## Error Handling
+
+All AI calls are wrapped in try/catch with sensible defaults:
+
+```typescript
+try {
+  const { text } = await generateText({ /* ... */ });
+  return parseAnalysis(text);
+} catch {
+  return {
+    accepted: false,
+    proposedAlternative: null,
+    tooSoon: false,
+    needsClarification: true,
+    clarificationQuestion: "just to confirm — does that time work for you?",
+  };
+}
+```

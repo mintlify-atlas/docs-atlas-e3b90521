@@ -1,0 +1,326 @@
+---
+title: How it works
+description: A detailed look at the jøsh system architecture and user journey
+---
+
+## System overview
+
+jøsh operates entirely through SMS, with AI handling onboarding, matching coordination, and date scheduling. The system is designed to minimize friction and maximize real-world connections.
+
+## User states
+
+Every user in jøsh progresses through a series of states:
+
+<Steps>
+  <Step title="ONBOARDING">
+    User has signed up but hasn't completed the onboarding flow. They're answering questions, uploading photos, or submitting their ID.
+  </Step>
+  
+  <Step title="PENDING_REVIEW">
+    User has completed onboarding and is waiting for manual admin review.
+  </Step>
+  
+  <Step title="APPROVED">
+    User has been approved by an admin. They're in the pool waiting to be matched.
+  </Step>
+  
+  <Step title="REJECTED">
+    User's application was declined. They receive a rejection message via SMS.
+  </Step>
+  
+  <Step title="BANNED">
+    User has been banned from the platform. They cannot sign up again with the same number.
+  </Step>
+</Steps>
+
+## Onboarding flow
+
+When a user signs up, they enter the onboarding flow. This happens entirely via SMS.
+
+### Step 1: Sign up
+
+Users visit the jøsh website and enter their phone number in E.164 format (+1XXXXXXXXXX). The signup endpoint:
+
+1. Validates the phone number format
+2. Checks if the number is already registered or banned
+3. Creates a new user record with status `ONBOARDING` and step `AWAITING_ABOUT`
+4. Sends the intro message: _"hey! welcome to jøsh - no swiping, no small talk, no overthinking. we'll handpick a match and text the plan. first, a few quick questions."_
+5. Sends the first onboarding question
+
+### Step 2: Answer questions
+
+Users answer 12 onboarding questions through SMS conversation. The questions are defined in `src/lib/tpoConstants.ts:9`:
+
+1. Gender and sexuality
+2. Dating intentions (long-term or casual)
+3. Work and education background
+4. Roots and languages
+5. Kids and pets
+6. Substances and dealbreakers
+7. Religious and political values alignment
+8. Ideal partner vibe
+9. Age and height preferences
+10. Physical preferences
+11. City
+12. Anything else to know
+
+#### Answer quality evaluation
+
+For each answer, the AI evaluates whether it's comprehensive enough. If not, it asks a follow-up question to get more detail. This is handled by the `evaluateOnboardingAnswer` function.
+
+#### Conversational adlibs
+
+To make the experience feel more human, the AI generates short conversational adlibs between certain questions (specifically after questions about work/education, roots/languages, and city). These are contextual responses like:
+
+- _"nice, love that energy. next question..."_
+- _"that sounds amazing. moving on..."_
+
+This is handled by the `getOnboardingAdlib` function and only triggers if the answer is at least 4 words long.
+
+### Step 3: Submit photos
+
+After answering all questions, users are prompted to send at least 2 photos: one close-up and one full-body. The system:
+
+1. Downloads each attachment from the Surge webhook
+2. Compresses images to max 1600px dimension and 70% JPEG quality
+3. Uploads to Supabase storage in the `photos/` folder
+4. Extracts AI tags from photos for matching purposes
+5. Requires at least 2 photos before moving to the next step
+
+### Step 4: Submit ID
+
+Users send a photo of their driver's license for identity verification. The system:
+
+1. Downloads the attachment
+2. Uploads to Supabase storage in the `ids/` folder
+3. Uses AI to extract name, age, and height from the license
+4. If extraction succeeds, marks the user as `COMPLETE` with status `PENDING_REVIEW`
+5. If extraction fails, asks for a clearer photo
+
+This extraction is done via the `extractDriversLicenseData` function with a 20-second timeout.
+
+### Step 5: Profile structuring
+
+Once the ID is verified, the system structures all the freeform onboarding answers into a JSON profile using the `structureUserProfile` function. This creates a standardized profile with fields like:
+
+- `about.hobbies`
+- `about.activityLevel`
+- `about.drinking`
+- `preferences.mustHaves`
+- `preferences.dealBreakers`
+
+This structured data is used later for AI-driven venue recommendations.
+
+## Manual matching
+
+Admins review pending applications through a backend interface at `/backend`. They can:
+
+- View user profiles with photos and answers
+- Approve or reject applications
+- Manually pair two approved users
+
+When an admin pairs two users, the system creates a new `TpoDate` record with status `ACTIVE` and kicks off the scheduling flow.
+
+## Date scheduling flow
+
+Once two users are paired, the AI coordinates scheduling entirely via SMS.
+
+### Scheduling phases
+
+The date progresses through these phases:
+
+1. **WAITING_FOR_A_REPLY**: User A has been sent a proposed time and hasn't responded yet
+2. **WAITING_FOR_A_ALTERNATIVE**: User A declined the proposed time and needs to suggest an alternative
+3. **WAITING_FOR_B_REPLY**: User B has been sent a proposed time and hasn't responded yet
+4. **WAITING_FOR_B_ALTERNATIVE**: User B declined and needs to suggest an alternative
+5. **AGREED**: Both users confirmed a time, date is scheduled, messaging portal is enabled
+
+### Initial proposal
+
+When a pair is created, User A immediately receives:
+
+1. _"you've been matched!"_
+2. A proposed date/time generated by the `proposeInitialTimeSlot` function (e.g., _"let's get the date on the calendar. how does Saturday, March 8th at 7pm work for you?"_)
+
+User B is **not notified yet**. They'll be contacted only after User A confirms or proposes an alternative.
+
+### Response analysis
+
+When either user responds during scheduling, the AI analyzes their message using the `analyzeSchedulingResponse` function (`src/lib/tpoScheduling.ts:119`). This function:
+
+- Determines if they accepted, proposed an alternative, or need clarification
+- Resolves relative date references ("tomorrow", "next Friday", "6 days from now")
+- Validates that proposed dates are at least 2 days in the future
+- Returns structured analysis with the next action
+
+The analysis considers the full conversation history to resolve ambiguous references.
+
+### Coordination logic
+
+Only the "expected actor" for the current phase can advance the scheduling state:
+
+- If it's `WAITING_FOR_A_REPLY` or `WAITING_FOR_A_ALTERNATIVE`, only User A's messages advance state
+- If it's `WAITING_FOR_B_REPLY` or `WAITING_FOR_B_ALTERNATIVE`, only User B's messages advance state
+
+If the "wrong" user responds, they get a holding message: _"just checking with your match — hang tight!"_
+
+### Confirmation and venue suggestion
+
+Once both users agree on a time, the system:
+
+1. Updates the date phase to `AGREED`
+2. Calls `suggestDateSpot` to generate a venue recommendation based on both profiles and the agreed time
+3. Sends both users a confirmation message:
+
+   ```
+   you're both confirmed for Saturday, March 8th at 7pm!
+
+   date spot: Cafe Maud in East Village, New York — cozy but lively, great for a first date conversation.
+
+   any messages to this number now go straight to your match. have fun!
+   ```
+
+4. Enables the messaging portal (`portalEnabled: true`)
+
+The venue suggestion uses AI to pick a **real, specific establishment** in the user's city based on:
+- Both users' structured profiles
+- The agreed date/time
+- Vibes, activity levels, and preferences extracted during onboarding
+
+### Validation rules
+
+The scheduling AI enforces these rules:
+
+- Dates must be at least 2 full days in the future
+- If a user proposes a date too soon, they're asked to pick something later
+- Ambiguous responses trigger clarification questions
+- The AI distinguishes between accepting a time and proposing an alternative, even if phrased positively
+
+## Messaging portal
+
+After the date is scheduled and the portal is enabled, any message sent to the jøsh number is relayed to the other user. The system:
+
+1. Receives the message via webhook
+2. Identifies the active date where `portalEnabled: true`
+3. Determines the recipient (the other person in the pair)
+4. Sanitizes the message for profanity using the `sanitizeBlockedWords` function
+5. Logs the message in the database with a `blocked` flag if profanity was detected
+6. Forwards the sanitized message to the recipient
+
+This lets matched users chat directly before their date, all through SMS.
+
+## Webhook handling
+
+All SMS interactions are handled through the Surge webhook at `/api/tpo/webhook` (`src/app/api/tpo/webhook/route.ts:958`). When a message is received:
+
+1. The webhook validates the Surge signature for security
+2. Looks up the user by phone number
+3. Routes to the appropriate handler based on user status:
+   - `ONBOARDING` → `handleOnboarding`
+   - `APPROVED` → Checks for active date in scheduling flow → `handleScheduling` or `handleMessageRelay`
+
+### Attachment handling
+
+When users send photos or IDs, the webhook:
+
+1. Tries to download the attachment without authentication first
+2. Falls back to authenticated download if needed
+3. Compresses images using Sharp
+4. Uploads to Supabase storage
+5. Extracts metadata (AI tags for photos, license data for IDs)
+
+All attachment operations have error handling to prevent onboarding from getting stuck.
+
+## AI components
+
+jøsh uses Mistral AI (specifically `mistral-medium`) for several intelligent features:
+
+### Onboarding answer quality evaluation
+
+Evaluates whether a user's answer is comprehensive enough or needs a follow-up question.
+
+### Conversational adlibs
+
+Generates natural transitional phrases between onboarding questions to make the experience feel more human.
+
+### Photo tagging
+
+Extracts descriptive tags from user photos for matching and profile enrichment.
+
+### Profile structuring
+
+Converts freeform onboarding answers into structured JSON with standardized fields.
+
+### Driver's license extraction
+
+Extracts name, age, height, and date of birth from license photos.
+
+### Scheduling analysis
+
+Analyzes user messages during scheduling to determine intent, extract proposed times, and resolve ambiguity.
+
+### Time slot proposal
+
+Generates appropriate first-date time slots (weekend or weekday evenings, at least 2 days out).
+
+### Venue recommendation
+
+Suggests real, specific venues in the user's city based on both profiles and the agreed date/time.
+
+## Admin tools
+
+Admins have access to a backend interface at `/backend` with these capabilities:
+
+- **View all users** with filtering by status
+- **Review applications** with full profiles, photos, and answers
+- **Approve or reject** pending users
+- **Manually pair** approved users to create matches
+- **View active dates** and their scheduling state
+- **End dates** to close a match and return users to the pool
+- **View message history** for any date
+
+These admin actions are protected by an internal API key header.
+
+## Data storage
+
+### Database (Prisma + PostgreSQL)
+
+- **TpoUser**: User records with onboarding state, answers, and profile data
+- **TpoDate**: Date records linking two users with scheduling state
+- **TpoMessage**: Message history for scheduling and portal chat
+
+### File storage (Supabase)
+
+- **photos/**: User photos, compressed and organized by phone number
+- **ids/**: Driver's license photos for verification
+
+All files are stored with the bucket name from `SUPABASE_UPLOAD_BUCKET` (default: `tpo-uploads`).
+
+## Security and privacy
+
+### Webhook signature validation
+
+All incoming Surge webhooks are validated with a signature header to prevent spoofing. This can be disabled in development with `SURGE_SKIP_WEBHOOK_VALIDATION=true`.
+
+### Internal API authentication
+
+Admin endpoints require an internal API key header (`x-internal-api-key`) to prevent unauthorized access.
+
+### Profanity filtering
+
+Messages relayed through the portal are sanitized for blocked words. The original message is logged with a `blocked` flag for review.
+
+### Identity verification
+
+Every user must submit a driver's license photo, which is processed to extract and verify identity information.
+
+## Error handling
+
+The system is designed to be resilient:
+
+- **Timeouts**: AI operations (license extraction, profile structuring) have 20-second timeouts and fallback gracefully
+- **Attachment failures**: If photo uploads fail, the system uses placeholder references to avoid blocking onboarding
+- **SMS delivery errors**: If downstream SMS fails, errors are logged but don't prevent state progression
+- **Missing AI keys**: When `AI_GATEWAY_API_KEY` is not set, the system falls back to safe defaults (accepts all inputs, suggests fallback venues)
+
+This ensures users can always progress through onboarding and scheduling, even if external services are degraded.

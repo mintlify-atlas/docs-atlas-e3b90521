@@ -1,0 +1,187 @@
+---
+title: 'Local Development Setup'
+description: 'Set up jøsh locally for development'
+icon: 'code'
+---
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Node.js** 20.x or later
+- **npm**, **yarn**, or **pnpm** package manager
+- **PostgreSQL** database (local or hosted)
+- **Git** for version control
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the jøsh repository to your local machine:
+
+    ```bash
+    git clone <repository-url>
+    cd jmash
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Install the project dependencies using your preferred package manager:
+
+    <CodeGroup>
+      ```bash npm
+      npm install
+      ```
+
+      ```bash yarn
+      yarn install
+      ```
+
+      ```bash pnpm
+      pnpm install
+      ```
+    </CodeGroup>
+
+    <Info>
+      The project uses Next.js 15 with React 18, Prisma ORM, and various AI/communication integrations.
+    </Info>
+  </Step>
+
+  <Step title="Configure environment variables">
+    Create a `.env` file in the root directory and configure your environment variables.
+
+    See the [Environment Variables](/technical/environment-variables) page for a complete reference.
+
+    <Warning>
+      Never commit your `.env` file to version control. It contains sensitive credentials.
+    </Warning>
+  </Step>
+
+  <Step title="Set up the database">
+    Generate the Prisma client and run database migrations:
+
+    <CodeGroup>
+      ```bash Generate Prisma Client
+      npm run db:generate
+      ```
+
+      ```bash Run Migrations
+      npm run db:migrate
+      ```
+    </CodeGroup>
+
+    This will:
+    - Generate the Prisma client based on your schema
+    - Create all necessary database tables and relationships
+    - Apply any pending migrations
+  </Step>
+
+  <Step title="Start the development server">
+    Launch the Next.js development server:
+
+    ```bash
+    npm run dev
+    ```
+
+    The application will be available at `http://localhost:3000`
+  </Step>
+</Steps>
+
+## Development Scripts
+
+The following npm scripts are available for development:
+
+| Script | Command | Description |
+|--------|---------|-------------|
+| **dev** | `npm run dev` | Start Next.js development server |
+| **build** | `npm run build` | Build production bundle |
+| **start** | `npm start` | Start production server |
+| **lint** | `npm run lint` | Run ESLint code linting |
+| **db:generate** | `npm run db:generate` | Generate Prisma client |
+| **db:migrate** | `npm run db:migrate` | Run database migrations |
+| **sms:check** | `npm run sms:check` | Check SMS segment calculations |
+
+## Project Structure
+
+The jøsh codebase follows Next.js 15 App Router conventions:
+
+```
+src/
+├── app/              # Next.js app router pages and API routes
+│   ├── api/          # API route handlers
+│   └── ...           # Page components
+├── lib/              # Utility functions and business logic
+├── server/           # Server-side code (tRPC, database)
+└── components/       # React components
+prisma/
+└── schema.prisma     # Database schema definition
+```
+
+<Info>
+  The application uses tRPC for type-safe API calls between client and server.
+</Info>
+
+## Database Schema
+
+The application uses PostgreSQL with Prisma ORM. Key models include:
+
+- **User** - Application users with voting history
+- **Photo** - Photo entries with ELO ratings
+- **Vote** - User votes for photo comparisons
+- **TpoUser** - TPO (Time, Place, Occasion) dating users
+- **TpoDate** - Scheduled dates between users
+- **Shot** - Shot-shooting feature entries
+
+View the complete schema at `prisma/schema.prisma:1`
+
+## AI & Communication Integrations
+
+jøsh integrates with several external services:
+
+- **OpenAI** - AI-powered features via AI SDK
+- **Mistral** - Alternative AI provider
+- **Supabase** - File storage and authentication
+- **Surge SMS** - SMS messaging for dating features
+- **PostHog** - Analytics and feature flags
+
+<Warning>
+  All integrations require proper environment variable configuration. Missing variables will cause runtime errors.
+</Warning>
+
+## Troubleshooting
+
+### Database Connection Issues
+
+If you encounter database connection errors:
+
+1. Verify your `DATABASE_URL` and `DIRECT_URL` are correct
+2. Ensure PostgreSQL is running
+3. Check that the database exists
+4. Run `npm run db:migrate` to apply migrations
+
+### Prisma Client Errors
+
+If Prisma client is not found:
+
+```bash
+npm run db:generate
+```
+
+### Port Already in Use
+
+If port 3000 is already in use, you can specify a different port:
+
+```bash
+PORT=3001 npm run dev
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Environment Variables" icon="key" href="/technical/environment-variables">
+    Configure all required environment variables
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/technical/deployment">
+    Deploy jøsh to production
+  </Card>
+</CardGroup>

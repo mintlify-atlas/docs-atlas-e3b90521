@@ -1,0 +1,414 @@
+---
+title: "SMS Integration"
+description: "SMS sending via Surge API with webhook handling for inbound messages"
+---
+
+## Overview
+
+The SMS integration uses the Surge API for sending and receiving text messages. Outbound messages are sent via REST API, while inbound messages arrive through a webhook endpoint with HMAC signature verification.
+
+## Surge API Configuration
+
+The system requires three environment variables:
+
+```bash
+SURGE_API_KEY=your_api_key
+SURGE_ACCOUNT_ID=your_account_id
+SURGE_WEBHOOK_SECRET=your_webhook_secret
+```
+
+<Note>
+The webhook secret is used to cryptographically verify that incoming webhooks actually come from Surge.
+</Note>
+
+## Sending SMS
+
+### Basic Usage
+
+```typescript src/lib/surgeSend.ts
+import { sendSms } from "@/lib/surgeSend";
+
+await sendSms(
+  "+14155551234",
+  "your match is free on Saturday at 7pm. does that work for you?"
+);
+```
+
+### Implementation
+
+```typescript src/lib/surgeSend.ts
+const SURGE_API_URL = "https://api.surge.app/accounts";
+
+export async function sendSms(
+  phoneNumber: string,
+  message: string,
+  options?: { skipProfanityFilter?: boolean }
+) {
+  if (!SURGE_API_KEY || !SURGE_ACCOUNT_ID) {
+    throw new Error("Missing Surge configuration");
+  }
+
+  const body = options?.skipProfanityFilter
+    ? message
+    : sanitizeBlockedWords(message);
+
+  const response = await axios.post(
+    `${SURGE_API_URL}/${SURGE_ACCOUNT_ID}/messages`,
+    {
+      conversation: {
+        contact: {
+          phone_number: phoneNumber,
+        },
+      },
+      body,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${SURGE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  return response.data;
+}
+```
+
+## SMS Encoding & Segmentation
+
+The system automatically detects encoding and calculates segment counts before sending:
+
+### Encoding Detection
+
+```typescript src/lib/surgeSend.ts
+const GSM_7_BASIC_CHARS = new Set(
+  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ`¿abcdefghijklmnopqrstuvwxyzäöñüà"
+);
+const GSM_7_EXTENDED_CHARS = new Set("^{}\\[~]|€");
+
+function estimateSmsSegments(message: string): {
+  encoding: "GSM-7" | "UCS-2";
+  segments: number;
+  units: number;
+} {
+  let gsmUnits = 0;
+  for (const char of message) {
+    if (GSM_7_BASIC_CHARS.has(char)) {
+      gsmUnits += 1;
+      continue;
+    }
+    if (GSM_7_EXTENDED_CHARS.has(char)) {
+      gsmUnits += 2; // Extended chars cost 2 units
+      continue;
+    }
+    // If any char isn't GSM-7, fall back to UCS-2
+    const ucsUnits = message.length;
+    return {
+      encoding: "UCS-2",
+      segments: ucsUnits <= 70 ? 1 : Math.ceil(ucsUnits / 67),
+      units: ucsUnits,
+    };
+  }
+  return {
+    encoding: "GSM-7",
+    segments: gsmUnits <= 160 ? 1 : Math.ceil(gsmUnits / 153),
+    units: gsmUnits,
+  };
+}
+```
+
+### Segment Limits
+
+| Encoding | Single Segment | Multi-Segment |
+|----------|----------------|---------------|
+| GSM-7    | 160 chars      | 153 chars each|
+| UCS-2    | 70 chars       | 67 chars each |
+
+<Note>
+Extended GSM-7 characters like `^`, `{`, `}`, `[`, `]`, `~`, `|`, `€` count as 2 units.
+</Note>
+
+### Multi-Segment Logging
+
+```typescript src/lib/surgeSend.ts
+const smsMeta = estimateSmsSegments(body);
+if (smsMeta.segments > 1) {
+  console.info("[sms] multi-segment outbound", {
+    to: phoneNumber,
+    segments: smsMeta.segments,
+    encoding: smsMeta.encoding,
+    units: smsMeta.units,
+    preview: body.slice(0, 120),
+  });
+}
+```
+
+## Profanity Filtering
+
+By default, outbound messages are sanitized to replace blocked words:
+
+```typescript
+// With profanity filter (default)
+await sendSms("+14155551234", "what the fuck");
+// Sends: "what the ****"
+
+// Skip profanity filter
+await sendSms(
+  "+14155551234",
+  "fuck yeah!",
+  { skipProfanityFilter: true }
+);
+// Sends: "fuck yeah!" (unchanged)
+```
+
+The `skipProfanityFilter` option is used for system-generated messages that are pre-vetted.
+
+## Webhook Handling
+
+Inbound messages arrive at the webhook endpoint as POST requests.
+
+### Webhook Payload
+
+```json
+{
+  "type": "message.received",
+  "data": {
+    "conversation": {
+      "contact": {
+        "phone_number": "+14155551234"
+      }
+    },
+    "body": "yeah that works for me!",
+    "attachments": [
+      {
+        "url": "https://surge.app/media/abc123",
+        "type": "image/jpeg"
+      }
+    ]
+  }
+}
+```
+
+### Signature Verification
+
+Every webhook includes a `Surge-Signature` header with HMAC-SHA256 signatures:
+
+```
+Surge-Signature: t=1709510400,v1=abc123def456...
+```
+
+#### Verification Algorithm
+
+```typescript src/lib/surgeWebhook.ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+const MAX_AGE_SECONDS = 300; // 5 minutes
+
+export function validateSurgeSignature(
+  signatureHeader: string | null,
+  rawBody: string
+): boolean {
+  if (!SURGE_WEBHOOK_SECRET || !signatureHeader) {
+    return false;
+  }
+
+  // Parse header: "t=1709510400,v1=abc123,v1=def456"
+  const parts = signatureHeader.split(",");
+  let timestamp: string | null = null;
+  const v1Hashes: string[] = [];
+
+  for (const part of parts) {
+    const [key, value] = part.split("=", 2);
+    if (key === "t") {
+      timestamp = value;
+    } else if (key === "v1" && value) {
+      v1Hashes.push(value);
+    }
+  }
+
+  if (!timestamp || v1Hashes.length === 0) {
+    return false;
+  }
+
+  // Verify timestamp is recent (prevent replay attacks)
+  const ts = parseInt(timestamp, 10);
+  if (isNaN(ts)) return false;
+
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - ts) > MAX_AGE_SECONDS) {
+    return false;
+  }
+
+  // Compute expected HMAC
+  const payload = `${timestamp}.${rawBody}`;
+  const expectedHash = createHmac("sha256", SURGE_WEBHOOK_SECRET)
+    .update(payload)
+    .digest("hex");
+
+  const expectedBuf = Buffer.from(expectedHash, "hex");
+
+  // Timing-safe comparison against all provided hashes
+  return v1Hashes.some((hash) => {
+    const hashBuf = Buffer.from(hash, "hex");
+    if (hashBuf.length !== expectedBuf.length) return false;
+    return timingSafeEqual(hashBuf, expectedBuf);
+  });
+}
+```
+
+<Accordion title="Why Timing-Safe Comparison?">
+Using `timingSafeEqual` prevents timing attacks where an attacker could infer the correct signature by measuring how long comparison takes. Standard string comparison (`===`) exits early on the first mismatch, leaking information about which bytes are correct.
+</Accordion>
+
+### Webhook Route
+
+```typescript src/app/api/tpo/webhook/route.ts
+export async function POST(req: NextRequest) {
+  const rawBody = await req.text();
+  const signatureHeader = req.headers.get("surge-signature");
+  const skipValidation = process.env.SURGE_SKIP_WEBHOOK_VALIDATION === "true";
+
+  if (!skipValidation && !validateSurgeSignature(signatureHeader, rawBody)) {
+    console.log("[tpo/webhook] Signature validation FAILED");
+    return NextResponse.json(
+      { message: "Invalid signature" },
+      { status: 401 }
+    );
+  }
+
+  const payload = JSON.parse(rawBody);
+
+  if (payload.type !== "message.received") {
+    return NextResponse.json({ ok: true });
+  }
+
+  const msg = payload.data;
+  const senderPhone: string = msg.conversation?.contact?.phone_number;
+  const messageBody: string | null = msg.body ?? null;
+  const attachments: SurgeAttachment[] = msg.attachments || [];
+
+  // Route to appropriate handler based on user status
+  const user = await db.tpoUser.findUnique({
+    where: { phoneNumber: senderPhone },
+  });
+
+  if (!user) {
+    await sendSms(senderPhone, TPO_DEFAULT_REPLY);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (user.status === "ONBOARDING") {
+    await handleOnboarding(user, messageBody, attachments);
+  } else if (user.status === "APPROVED") {
+    await handleScheduling(senderPhone, messageBody, activeDate);
+  }
+
+  return NextResponse.json({ ok: true });
+}
+```
+
+## Attachment Handling
+
+Attachments (photos, driver's licenses) are downloaded and uploaded to Supabase:
+
+```typescript src/app/api/tpo/webhook/route.ts
+interface SurgeAttachment {
+  url?: string;
+  type?: string;
+  media_url?: string;
+  file_url?: string;
+  download_url?: string;
+}
+
+async function downloadAttachment(url: string): Promise<AttachmentDownloadResult> {
+  const surgeApiKey = process.env.SURGE_API_KEY;
+
+  // Try unauthenticated first
+  const unauthRes = await fetch(url);
+  if (unauthRes.ok) {
+    return {
+      buffer: Buffer.from(await unauthRes.arrayBuffer()),
+      contentType: unauthRes.headers.get("content-type") ?? "application/octet-stream",
+    };
+  }
+
+  // Fall back to authenticated request
+  if (!surgeApiKey) {
+    throw new Error(`Failed to download attachment from ${url}`);
+  }
+
+  const authRes = await fetch(url, {
+    headers: { Authorization: `Bearer ${surgeApiKey}` },
+  });
+  if (!authRes.ok) {
+    throw new Error(`Failed to download attachment from ${url}`);
+  }
+
+  return {
+    buffer: Buffer.from(await authRes.arrayBuffer()),
+    contentType: authRes.headers.get("content-type") ?? "application/octet-stream",
+  };
+}
+```
+
+### Image Compression
+
+Images are automatically resized and compressed before storage:
+
+```typescript src/app/api/tpo/webhook/route.ts
+const MAX_DIMENSION = 1600;
+const JPEG_QUALITY = 70;
+
+try {
+  uploadBuffer = await sharp(rawBuffer)
+    .resize(MAX_DIMENSION, MAX_DIMENSION, {
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: JPEG_QUALITY, progressive: true })
+    .toBuffer();
+  uploadContentType = "image/jpeg";
+  extension = "jpg";
+} catch (compressionErr) {
+  console.warn("Image compression failed, uploading original");
+}
+```
+
+## Development Mode
+
+For local testing, signature validation can be disabled:
+
+```bash
+SURGE_SKIP_WEBHOOK_VALIDATION=true
+```
+
+<Note>
+Never set `SURGE_SKIP_WEBHOOK_VALIDATION=true` in production. This disables security.
+</Note>
+
+## Error Handling
+
+### Missing Configuration
+
+```typescript
+if (!SURGE_API_KEY || !SURGE_ACCOUNT_ID) {
+  throw new Error("Missing Surge configuration (SURGE_API_KEY or SURGE_ACCOUNT_ID)");
+}
+```
+
+### Webhook Errors
+
+```typescript
+try {
+  // ... process webhook ...
+  return NextResponse.json({ ok: true });
+} catch (error) {
+  console.error("[tpo/webhook] Error:", error);
+  return NextResponse.json(
+    { message: "Webhook processing failed" },
+    { status: 500 }
+  );
+}
+```
+
+Errors in webhook processing are logged but return 500, which tells Surge to retry delivery.

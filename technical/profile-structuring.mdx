@@ -1,0 +1,298 @@
+---
+title: "Profile Structuring"
+description: "AI-powered profile structuring system that converts free-text onboarding responses into structured JSON with normalized badges"
+---
+
+## Overview
+
+The profile structuring system converts unstructured user onboarding text into a strongly-typed JSON schema with normalized badge phrases. It extracts key attributes about users and their preferences, enabling structured matching logic while preserving the richness of natural language input.
+
+## How It Works
+
+Profile structuring happens during onboarding after users submit their "About Me" and preferences text. The system uses OpenAI GPT-4o-mini to parse free-form responses into two distinct sections:
+
+- **About**: Facts and qualities about the user themselves
+- **Preferences**: What the user wants in a partner
+
+<Note>
+The AI is explicitly instructed not to mix these categories - personal attributes stay in "about" and partner preferences stay in "preferences".
+</Note>
+
+## Structured Schema
+
+### About Section
+
+```typescript
+export interface AboutStructured {
+  summary: string | null;
+  lookingForNow: string | null;
+  gender: string | null;
+  sexuality: string | null;
+  work: string | null;
+  hobbies: string[];
+  friendDescription: string | null;
+  introExtro: string | null;
+  weekdaySocialLevel: string | null;
+  weekendSocialLevel: string | null;
+  drinking: string | null;
+  smoking: string | null;
+  sleepSchedule: string | null;
+  activityLevel: string | null;
+  fridayNight: string | null;
+  sunday: string | null;
+  homeCleanliness: string | null;
+  communicationWhenInterested: string | null;
+  directness: string | null;
+  conflictStyle: string | null;
+  planningStyle: string | null;
+  personalValues: string[];
+  relationshipIntent: string | null;
+  boundaries: string[];
+  kidsMentioned: string | null;
+  petsMentioned: string | null;
+}
+```
+
+### Preferences Section
+
+```typescript
+export interface PreferencesStructured {
+  summary: string | null;
+  mustHaves: string[];
+  ageRange: string | null;
+  heightRange: string | null;
+  bodyTypePreferences: string[];
+  faceFeaturePreferences: string[];
+  stylePreferences: string[];
+  groomingPreferences: string[];
+  tattoosPiercingsPreference: string | null;
+  voiceAccentPreferences: string[];
+  raceEthnicityPreferences: string[];
+  jobAmbitionPreferences: string[];
+  personalityTraits: string[];
+  socialEnergyPreference: string | null;
+  religionCompatibility: string | null;
+  politicalCompatibility: string | null;
+  drinkingPreference: string | null;
+  smokingPreference: string | null;
+  textingFrequency: string | null;
+  replySpeed: string | null;
+  meetupFrequency: string | null;
+  datePlanningPreference: string | null;
+  locationLimits: string | null;
+  dealbreakers: string[];
+}
+```
+
+## Badge Normalization
+
+Badge phrases are automatically normalized to create consistent, concise tags:
+
+### Normalization Rules
+
+1. **Strip filler phrases**: "being smart" → "smart"
+2. **Remove articles**: "a kind person" → "kind person"
+3. **Remove leading phrases**: "someone who is adventurous" → "adventurous"
+4. **Collapse whitespace**: Multiple spaces/newlines → single space
+5. **Strip trailing punctuation**: "outdoorsy." → "outdoorsy"
+6. **Lowercase normalization**: Consistent casing for matching
+7. **Limit to 1-3 words**: Prefer 1-2 word phrases
+
+### Example Transformations
+
+```typescript
+// Input examples and their normalized output:
+"i like people with unhinged humor" → "unhinged humor"
+"someone who's really kind and emotionally mature" → ["kind", "emotionally mature"]
+"I'm a coffee enthusiast" → "coffee enthusiast"
+"being spontaneous" → "spontaneous"
+```
+
+<Accordion title="Normalization Implementation">
+```typescript src/lib/profileStructuring.ts
+function normalizeBadgePhrase(value: string): string | null {
+  let normalized = stripTrailingPunctuation(value.trim().toLowerCase());
+  if (!normalized) return null;
+
+  // Strip "I'm" or "I am" prefix
+  if (normalized.startsWith("i'm ")) {
+    normalized = normalized.slice(4);
+  } else if (normalized.startsWith("i am ")) {
+    normalized = normalized.slice(5);
+  }
+
+  // Remove articles
+  for (const article of ["a ", "an ", "the "]) {
+    if (normalized.startsWith(article)) {
+      normalized = normalized.slice(article.length);
+      break;
+    }
+  }
+
+  normalized = collapseWhitespace(normalized);
+
+  // Remove common leading phrase patterns
+  const LEADING_PHRASE_PREFIXES = [
+    "being ",
+    "is ",
+    "someone who is ",
+    "someone who's ",
+    "a person who is ",
+    "person who is ",
+    "someone that is ",
+    "someone that's ",
+  ];
+
+  for (const prefix of LEADING_PHRASE_PREFIXES) {
+    if (normalized.startsWith(prefix)) {
+      normalized = normalized.slice(prefix.length).trim();
+      break;
+    }
+  }
+
+  return normalized || null;
+}
+```
+</Accordion>
+
+## AI Prompt Strategy
+
+The system uses a detailed prompt to guide GPT-4o-mini through the structuring process:
+
+```typescript src/lib/profileStructuring.ts
+const { text } = await generateText({
+  model: "openai/gpt-4o-mini",
+  prompt: `Convert this dating onboarding profile into structured JSON.
+Use this split:
+- "about" = facts and qualities about the user
+- "preferences" = what the user wants in a partner
+
+Important:
+- Do not put partner preferences inside "about".
+- Do not put personal self-description inside "preferences".
+- Do not invent facts; unknown should be null or [].
+- Preserve explicit answers from Q/A content when present.
+
+Name: ${input.dlName ?? "Unknown"}
+Age: ${input.dlAge ?? "Unknown"}
+Height: ${input.dlHeight ?? "Unknown"}
+City: ${input.city ?? "Unknown"}
+
+About:
+${input.aboutMe ?? "Unknown"}
+
+Preferences:
+${input.preferences ?? "Unknown"}
+
+Rules:
+- keep every value concise: 1-3 words only (prefer 1-2 words).
+- remove filler phrases (example: "being smart" -> "smart").
+- do real semantic normalization, not truncation.
+- examples: "i like people with unhinged humor" -> "unhinged humor"
+- keep array items short and specific.
+- if unknown, use null or [].
+- no markdown and no extra keys.`,
+  maxOutputTokens: 700,
+});
+```
+
+## Merging Strategy
+
+When re-running structuring (e.g., user updates their profile), the system preserves existing data:
+
+```typescript src/lib/profileStructuring.ts
+function chooseString(next: string | null, prev: string | null): string | null {
+  return next && next.trim().length > 0 ? next : prev;
+}
+
+function chooseStringArray(next: string[], prev: string[]): string[] {
+  if (next.length > 0) return next;
+  return prev;
+}
+```
+
+This ensures that previously extracted attributes aren't lost when users add more information.
+
+## Photo AI Tags
+
+Profile structuring also integrates photo analysis tags extracted from user photos via GPT-4 Vision:
+
+```typescript src/app/api/tpo/webhook/route.ts
+function mergePhotoAiTags(
+  structuredProfile: unknown,
+  tagsToAdd: string[]
+): Prisma.InputJsonValue {
+  const base = structuredProfile && typeof structuredProfile === "object"
+    ? (structuredProfile as Record<string, unknown>)
+    : {};
+  const existingTags = readPhotoAiTags(base);
+  const mergedTags = Array.from(new Set([...existingTags, ...tagsToAdd])).slice(0, 60);
+  return {
+    ...base,
+    photoAiTags: mergedTags,
+  } as Prisma.InputJsonValue;
+}
+```
+
+Photo tags are limited to 60 total and deduplicated automatically.
+
+## Configuration
+
+The profile structuring system requires the AI gateway API key:
+
+```bash
+AI_GATEWAY_API_KEY=your_key_here
+```
+
+If the key is missing, the system returns an empty profile structure rather than failing:
+
+```typescript
+if (!process.env.AI_GATEWAY_API_KEY) {
+  return EMPTY_PROFILE;
+}
+```
+
+## Error Handling
+
+The system gracefully degrades on errors:
+
+```typescript src/lib/profileStructuring.ts
+try {
+  const { text } = await generateText({ /* ... */ });
+  return parseStructuredProfile(text);
+} catch {
+  return EMPTY_PROFILE;
+}
+```
+
+JSON parsing errors also return the empty profile structure, ensuring the onboarding flow never crashes due to AI output issues.
+
+## Usage Example
+
+```typescript
+import { structureUserProfile } from "@/lib/profileStructuring";
+
+const structured = await structureUserProfile({
+  aboutMe: "I work in tech and love hiking on weekends. Very introverted but love deep conversations.",
+  preferences: "Looking for someone ambitious, kind, and into outdoor activities. Must be a dog person.",
+  city: "San Francisco",
+  dlName: "Alex Johnson",
+  dlAge: 28,
+  dlHeight: "5'10\"",
+});
+
+// Returns:
+// {
+//   about: {
+//     work: "tech",
+//     hobbies: ["hiking"],
+//     introExtro: "introverted",
+//     ...
+//   },
+//   preferences: {
+//     personalityTraits: ["ambitious", "kind"],
+//     mustHaves: ["dog person"],
+//     ...
+//   }
+// }
+```

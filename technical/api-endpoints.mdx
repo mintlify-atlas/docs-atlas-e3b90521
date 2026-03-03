@@ -1,0 +1,774 @@
+---
+title: API Endpoints
+description: Complete REST API reference for jøsh TPO endpoints
+---
+
+## Overview
+
+All TPO (Time/Place/Occasion) endpoints are located under `/api/tpo/`. The API uses:
+
+- **REST architecture** with JSON payloads
+- **Internal API key authentication** for admin endpoints (via `x-internal-api-key` header)
+- **Surge webhook signature validation** for SMS webhooks
+
+---
+
+## Public Endpoints
+
+### POST /api/tpo/signup
+
+Initiates user onboarding via SMS.
+
+**Authentication**: None (public)
+
+<ParamField body="phoneNumber" type="string" required>
+  E.164 format phone number (e.g., `+12125551234`)
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether signup succeeded
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Error message if signup failed
+</ResponseField>
+
+#### Request Example
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://josh.example.com/api/tpo/signup \
+  -H "Content-Type: application/json" \
+  -d '{"phoneNumber": "+12125551234"}'
+```
+
+```typescript TypeScript
+const response = await fetch('/api/tpo/signup', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ phoneNumber: '+12125551234' }),
+});
+
+const data = await response.json();
+```
+</CodeGroup>
+
+#### Response Examples
+
+<CodeGroup>
+```json Success (201)
+{
+  "success": true
+}
+```
+
+```json Already Exists (409)
+{
+  "message": "You've already signed up! Check your texts."
+}
+```
+
+```json Banned (403)
+{
+  "message": "This number has been banned from jøsh."
+}
+```
+
+```json Invalid Phone (400)
+{
+  "message": "Invalid phone number. Expected E.164 format (+1XXXXXXXXXX)."
+}
+```
+</CodeGroup>
+
+#### Source Code
+
+**Location**: `src/app/api/tpo/signup/route.ts:9`
+
+```typescript
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const { phoneNumber } = body;
+
+  if (!/^\+1\d{10}$/.test(phoneNumber)) {
+    return NextResponse.json(
+      { message: "Invalid phone number. Expected E.164 format (+1XXXXXXXXXX)." },
+      { status: 400 }
+    );
+  }
+
+  await db.tpoUser.create({
+    data: {
+      phoneNumber,
+      status: "ONBOARDING",
+      onboardingStep: "AWAITING_ABOUT",
+      onboardingQuestionIndex: 0,
+    },
+  });
+
+  await sendSms(phoneNumber, TPO_INTRO_TEXT);
+  // ... continues with first question
+}
+```
+
+---
+
+### POST /api/tpo/webhook
+
+Receives SMS messages from Surge API. Handles onboarding, scheduling, and message relay.
+
+**Authentication**: Surge signature validation
+
+**Headers**:
+- `surge-signature` - HMAC signature for request validation
+
+**Body**: Surge webhook payload (see Surge API docs)
+
+<Expandable title="Surge Webhook Payload Structure">
+```typescript
+interface SurgeWebhookPayload {
+  type: "message.received";
+  data: {
+    conversation: {
+      contact: {
+        phone_number: string; // E.164 format
+      };
+    };
+    body?: string;
+    attachments?: {
+      url?: string;
+      media_url?: string;
+      file_url?: string;
+      download_url?: string;
+      type?: string;
+    }[];
+  };
+}
+```
+</Expandable>
+
+#### Response
+
+```json
+{ "ok": true }
+```
+
+#### Source Code
+
+**Location**: `src/app/api/tpo/webhook/route.ts:958`
+
+<Expandable title="Webhook Flow Logic">
+```typescript
+export async function POST(req: NextRequest) {
+  const rawBody = await req.text();
+  const signatureHeader = req.headers.get("surge-signature");
+  
+  if (!validateSurgeSignature(signatureHeader, rawBody)) {
+    return NextResponse.json({ message: "Invalid signature" }, { status: 401 });
+  }
+
+  const payload = JSON.parse(rawBody);
+  const senderPhone = payload.data.conversation?.contact?.phone_number;
+  const user = await db.tpoUser.findUnique({ where: { phoneNumber: senderPhone } });
+
+  if (user.status === "ONBOARDING") {
+    await handleOnboarding(user, messageBody, attachments);
+  } else if (user.status === "APPROVED") {
+    const schedulingDate = await db.tpoDate.findFirst({
+      where: {
+        status: "ACTIVE",
+        portalEnabled: false,
+        OR: [{ userA: { phoneNumber: senderPhone } }, { userB: { phoneNumber: senderPhone } }],
+      },
+    });
+    
+    if (schedulingDate) {
+      await handleScheduling(senderPhone, messageBody, schedulingDate);
+    } else {
+      await handleMessageRelay(senderPhone, messageBody);
+    }
+  }
+}
+```
+</Expandable>
+
+---
+
+## Admin Endpoints
+
+All admin endpoints require the `x-internal-api-key` header.
+
+### GET /api/tpo/admin/users
+
+Fetches users with optional status filter.
+
+**Authentication**: Internal API key
+
+<ParamField query="status" type="TpoUserStatus">
+  Filter by status: `ONBOARDING`, `PENDING_REVIEW`, `APPROVED`, `REJECTED`, `BANNED`
+</ParamField>
+
+<ResponseField name="users" type="TpoUser[]">
+  Array of user objects
+</ResponseField>
+
+#### Request Example
+
+```bash
+curl https://josh.example.com/api/tpo/admin/users?status=PENDING_REVIEW \
+  -H "x-internal-api-key: your-secret-key"
+```
+
+#### Response Example
+
+```json
+{
+  "users": [
+    {
+      "id": "clx123abc",
+      "phoneNumber": "+12125551234",
+      "status": "PENDING_REVIEW",
+      "onboardingStep": "COMPLETE",
+      "aboutMe": "Q: tell us about yourself.\nA: I'm a software engineer...",
+      "city": "New York",
+      "photoUrls": ["photos/2125551234/1234567890.jpg"],
+      "dlName": "John Doe",
+      "dlAge": 28,
+      "createdAt": "2026-03-01T12:00:00Z"
+    }
+  ]
+}
+```
+
+**Source**: `src/app/api/tpo/admin/users/route.ts:8`
+
+---
+
+### POST /api/tpo/admin/review
+
+Approves or rejects a pending user.
+
+**Authentication**: Internal API key
+
+<ParamField body="userId" type="string" required>
+  User ID to review
+</ParamField>
+
+<ParamField body="action" type="string" required>
+  Either `approve` or `reject`
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether action succeeded
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  New user status: `APPROVED` or `REJECTED`
+</ResponseField>
+
+#### Request Example
+
+```bash
+curl -X POST https://josh.example.com/api/tpo/admin/review \
+  -H "Content-Type: application/json" \
+  -H "x-internal-api-key: your-secret-key" \
+  -d '{
+    "userId": "clx123abc",
+    "action": "approve"
+  }'
+```
+
+#### Response Example
+
+```json
+{
+  "success": true,
+  "status": "APPROVED"
+}
+```
+
+**Source**: `src/app/api/tpo/admin/review/route.ts:10`
+
+<Expandable title="What Happens on Approval">
+1. User status updated to `APPROVED`
+2. SMS sent to user with acceptance message
+3. User can now be paired for dates
+</Expandable>
+
+---
+
+### POST /api/tpo/admin/pair
+
+Creates a matched pair and initiates scheduling.
+
+**Authentication**: Internal API key
+
+<ParamField body="userAId" type="string" required>
+  First user ID (must be APPROVED)
+</ParamField>
+
+<ParamField body="userBId" type="string" required>
+  Second user ID (must be APPROVED)
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether pairing succeeded
+</ResponseField>
+
+<ResponseField name="dateId" type="string">
+  Created TpoDate ID
+</ResponseField>
+
+#### Request Example
+
+```bash
+curl -X POST https://josh.example.com/api/tpo/admin/pair \
+  -H "Content-Type: application/json" \
+  -H "x-internal-api-key: your-secret-key" \
+  -d '{
+    "userAId": "clx123abc",
+    "userBId": "clx456def"
+  }'
+```
+
+#### Response Example
+
+```json
+{
+  "success": true,
+  "dateId": "clx789ghi"
+}
+```
+
+**Source**: `src/app/api/tpo/admin/pair/route.ts:10`
+
+<Expandable title="Pairing Flow">
+1. Validates both users are `APPROVED`
+2. Checks neither has an active date
+3. Creates `TpoDate` with `schedulingPhase: WAITING_FOR_A_REPLY`
+4. Calls Mistral to propose initial time slot
+5. Sends "you've been matched!" to User A
+6. Sends time proposal to User A
+7. User B notified only after A confirms availability
+</Expandable>
+
+---
+
+### POST /api/tpo/admin/user-action
+
+Performs administrative actions on a user.
+
+**Authentication**: Internal API key
+
+<ParamField body="userId" type="string" required>
+  Target user ID
+</ParamField>
+
+<ParamField body="action" type="string" required>
+  One of:
+  - `delete` - Permanently delete user and their dates
+  - `ban` - Set status to BANNED and end active dates
+  - `restart_onboarding` - Reset user to beginning of onboarding
+  - `ping_onboarding` - Send reminder SMS about current step
+  - `cancel_onboarding` - Delete user record (for incomplete onboarding)
+  - `reparse_profile` - Re-run AI profile structuring
+  - `edit_badge` - Update a specific profile field
+  - `delete_badge` - Remove a specific profile field
+</ParamField>
+
+<ParamField body="section" type="string">
+  For badge actions: `about` or `preferences`
+</ParamField>
+
+<ParamField body="field" type="string">
+  For badge actions: field name (e.g., `hobbies`, `city`, `age`)
+</ParamField>
+
+<ParamField body="currentValue" type="string">
+  For badge actions: current value to replace
+</ParamField>
+
+<ParamField body="nextValue" type="string">
+  For edit_badge: new value (omit for delete_badge)
+</ParamField>
+
+#### Request Examples
+
+<CodeGroup>
+```json Ban User
+{
+  "userId": "clx123abc",
+  "action": "ban"
+}
+```
+
+```json Restart Onboarding
+{
+  "userId": "clx123abc",
+  "action": "restart_onboarding"
+}
+```
+
+```json Edit Profile Badge
+{
+  "userId": "clx123abc",
+  "action": "edit_badge",
+  "section": "about",
+  "field": "hobbies",
+  "currentValue": "hiking",
+  "nextValue": "rock climbing"
+}
+```
+
+```json Ping Onboarding
+{
+  "userId": "clx123abc",
+  "action": "ping_onboarding"
+}
+```
+</CodeGroup>
+
+#### Response Examples
+
+<CodeGroup>
+```json Banned
+{
+  "success": true,
+  "status": "BANNED"
+}
+```
+
+```json Restarted
+{
+  "success": true,
+  "status": "ONBOARDING"
+}
+```
+
+```json Pinged
+{
+  "success": true,
+  "reminder": "quick reminder: send 1 more photo so we can continue onboarding."
+}
+```
+</CodeGroup>
+
+**Source**: `src/app/api/tpo/admin/user-action/route.ts:245`
+
+---
+
+### GET /api/tpo/admin/dates
+
+Fetches all dates with optional status filter.
+
+**Authentication**: Internal API key
+
+<ParamField query="status" type="TpoDateStatus">
+  Filter by status: `ACTIVE` or `ENDED`
+</ParamField>
+
+<ResponseField name="dates" type="object[]">
+  Array of date objects with user details and message count
+</ResponseField>
+
+#### Request Example
+
+```bash
+curl https://josh.example.com/api/tpo/admin/dates?status=ACTIVE \
+  -H "x-internal-api-key: your-secret-key"
+```
+
+#### Response Example
+
+```json
+{
+  "dates": [
+    {
+      "id": "clx789ghi",
+      "createdAt": "2026-03-02T10:00:00Z",
+      "status": "ACTIVE",
+      "schedulingPhase": "AGREED",
+      "proposedSlot": "Friday, March 7th at 7pm",
+      "agreedTime": "Friday, March 7th at 7pm",
+      "suggestedPlace": "Cafe Maud in East Village, New York — cozy but lively, great for first dates",
+      "portalEnabled": true,
+      "userA": {
+        "id": "clx123abc",
+        "phoneNumber": "+12125551234",
+        "city": "New York",
+        "dlName": "John Doe",
+        "dlAge": 28
+      },
+      "userB": {
+        "id": "clx456def",
+        "phoneNumber": "+12125555678",
+        "city": "Brooklyn",
+        "dlName": "Jane Smith",
+        "dlAge": 26
+      },
+      "_count": {
+        "messages": 12
+      }
+    }
+  ]
+}
+```
+
+**Source**: `src/app/api/tpo/admin/dates/route.ts:8`
+
+---
+
+### GET /api/tpo/admin/messages
+
+Fetches all messages for a specific date.
+
+**Authentication**: Internal API key
+
+<ParamField query="dateId" type="string" required>
+  Date ID to fetch messages for
+</ParamField>
+
+<ResponseField name="messages" type="object[]">
+  Array of messages in chronological order
+</ResponseField>
+
+#### Request Example
+
+```bash
+curl "https://josh.example.com/api/tpo/admin/messages?dateId=clx789ghi" \
+  -H "x-internal-api-key: your-secret-key"
+```
+
+#### Response Example
+
+```json
+{
+  "messages": [
+    {
+      "id": "clxmsg001",
+      "createdAt": "2026-03-02T10:05:00Z",
+      "fromPhone": "system",
+      "toPhone": "+12125551234",
+      "body": "let's get the date on the calendar. how does Friday, March 7th at 7pm work for you?",
+      "blocked": false
+    },
+    {
+      "id": "clxmsg002",
+      "createdAt": "2026-03-02T10:07:00Z",
+      "fromPhone": "+12125551234",
+      "toPhone": "system",
+      "body": "works for me!",
+      "blocked": false
+    },
+    {
+      "id": "clxmsg003",
+      "createdAt": "2026-03-02T10:08:00Z",
+      "fromPhone": "system",
+      "toPhone": "+12125555678",
+      "body": "your match is free on Friday, March 7th at 7pm. does that work for you?",
+      "blocked": false
+    }
+  ]
+}
+```
+
+**Source**: `src/app/api/tpo/admin/messages/route.ts:8`
+
+---
+
+### POST /api/tpo/admin/end-date
+
+Manually ends an active date.
+
+**Authentication**: Internal API key
+
+<ParamField body="dateId" type="string" required>
+  Date ID to end
+</ParamField>
+
+<ResponseField name="success" type="boolean">
+  Whether date was ended
+</ResponseField>
+
+#### Request Example
+
+```bash
+curl -X POST https://josh.example.com/api/tpo/admin/end-date \
+  -H "Content-Type: application/json" \
+  -H "x-internal-api-key: your-secret-key" \
+  -d '{"dateId": "clx789ghi"}'
+```
+
+#### Response Example
+
+```json
+{
+  "success": true
+}
+```
+
+**Source**: `src/app/api/tpo/admin/end-date/route.ts:10`
+
+<Expandable title="What Happens When Date Ends">
+1. Date status set to `ENDED`
+2. `endedAt` timestamp recorded
+3. Both users sent notification SMS
+4. Users can no longer message each other
+5. Users become available for new matches
+</Expandable>
+
+---
+
+### POST /api/tpo/admin/signed-url
+
+Generates temporary signed URLs for Supabase storage objects.
+
+**Authentication**: Internal API key
+
+<ParamField body="paths" type="string[]" required>
+  Array of storage paths (e.g., `["photos/2125551234/1234567890.jpg"]`)
+</ParamField>
+
+<ParamField body="size" type="string">
+  `thumbnail` (400x400) or `full` (1200px width). Defaults to thumbnail.
+</ParamField>
+
+<ResponseField name="urls" type="object">
+  Map of original paths to signed URLs
+</ResponseField>
+
+#### Request Example
+
+```bash
+curl -X POST https://josh.example.com/api/tpo/admin/signed-url \
+  -H "Content-Type: application/json" \
+  -H "x-internal-api-key: your-secret-key" \
+  -d '{
+    "paths": [
+      "photos/2125551234/1234567890.jpg",
+      "ids/2125551234/9876543210.jpg"
+    ],
+    "size": "full"
+  }'
+```
+
+#### Response Example
+
+```json
+{
+  "urls": {
+    "photos/2125551234/1234567890.jpg": "https://supabase.co/storage/v1/object/sign/tpo-uploads/photos/2125551234/1234567890.jpg?token=xyz&transform=...",
+    "ids/2125551234/9876543210.jpg": "https://supabase.co/storage/v1/object/sign/tpo-uploads/ids/2125551234/9876543210.jpg?token=abc&transform=..."
+  }
+}
+```
+
+**Source**: `src/app/api/tpo/admin/signed-url/route.ts:53`
+
+<Note>
+Signed URLs expire after 1 hour. For direct URLs (legacy fallback refs), the original URL is returned.
+</Note>
+
+---
+
+## Error Responses
+
+All endpoints return consistent error structures:
+
+<CodeGroup>
+```json 400 Bad Request
+{
+  "message": "userId and action (approve|reject) are required"
+}
+```
+
+```json 401 Unauthorized
+{
+  "message": "Unauthorized"
+}
+```
+
+```json 403 Forbidden
+{
+  "message": "This number has been banned from jøsh."
+}
+```
+
+```json 404 Not Found
+{
+  "message": "User not found"
+}
+```
+
+```json 409 Conflict
+{
+  "message": "One or both users already have an active date"
+}
+```
+
+```json 500 Internal Server Error
+{
+  "message": "Something went wrong. Please try again."
+}
+```
+</CodeGroup>
+
+---
+
+## Authentication
+
+### Internal API Key
+
+Admin endpoints require the `x-internal-api-key` header:
+
+```typescript
+const key = req.headers.get("x-internal-api-key");
+if (!hasValidInternalApiKey(key)) {
+  return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+}
+```
+
+**Set via environment variable**:
+```bash
+INTERNAL_API_KEY=your-secret-key
+```
+
+### Surge Webhook Validation
+
+The `/api/tpo/webhook` endpoint validates Surge signatures:
+
+```typescript
+const signatureHeader = req.headers.get("surge-signature");
+if (!validateSurgeSignature(signatureHeader, rawBody)) {
+  return NextResponse.json({ message: "Invalid signature" }, { status: 401 });
+}
+```
+
+**Set via environment variable**:
+```bash
+SURGE_WEBHOOK_SECRET=your-webhook-secret
+```
+
+Skip validation in development:
+```bash
+SURGE_SKIP_WEBHOOK_VALIDATION=true
+```
+
+---
+
+## Rate Limiting
+
+Currently no rate limiting is implemented. Consider adding rate limiting for production deployments.
+
+---
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/technical/architecture">
+    System design and AI integration points
+  </Card>
+  <Card title="Database Schema" icon="database" href="/technical/database-schema">
+    Prisma models and relationships
+  </Card>
+</CardGroup>

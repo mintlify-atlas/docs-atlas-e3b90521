@@ -1,0 +1,432 @@
+---
+title: "AI Models"
+description: "AI model usage and configuration across profile structuring, scheduling, and onboarding"
+---
+
+## Overview
+
+The jøsh platform uses a combination of OpenAI and Mistral models for different AI tasks. Model selection is based on task requirements:
+
+- **OpenAI GPT-4o-mini**: Fast, cost-effective for structured extraction and vision tasks
+- **Mistral Medium**: Strong natural language understanding for scheduling negotiations
+
+## Model Configuration
+
+All AI calls use the Vercel AI SDK with a unified gateway:
+
+```bash
+AI_GATEWAY_API_KEY=your_api_key_here
+```
+
+<Note>
+The AI gateway key works with both OpenAI and Mistral models through a single unified endpoint.
+</Note>
+
+## Model Usage by Feature
+
+### Profile Structuring
+
+**Model**: `openai/gpt-4o-mini`
+
+**Purpose**: Convert free-text onboarding responses into structured JSON with normalized badge phrases.
+
+```typescript src/lib/profileStructuring.ts
+const MODEL = "openai/gpt-4o-mini";
+
+const { text } = await generateText({
+  model: MODEL,
+  prompt: `Convert this dating onboarding profile into structured JSON...`,
+  maxOutputTokens: 700,
+});
+```
+
+**Token Budget**: 700 output tokens
+
+**Why GPT-4o-mini?**
+- Excellent at structured output formatting
+- Fast response times for real-time onboarding
+- Cost-effective for high-volume profile processing
+
+### Scheduling System
+
+**Model**: `mistral/mistral-medium`
+
+**Purpose**: Analyze natural language scheduling responses and generate date/time proposals.
+
+```typescript src/lib/tpoScheduling.ts
+const MODEL = "mistral/mistral-medium";
+
+// Propose initial time slot
+const { text } = await generateText({
+  model: MODEL,
+  prompt: `You are scheduling a first date for a dating app...`,
+  maxOutputTokens: 30,
+});
+
+// Analyze scheduling response
+const { text } = await generateText({
+  model: MODEL,
+  prompt: `You are analyzing a user's message in a dating app scheduling conversation...`,
+  maxOutputTokens: 160,
+});
+
+// Suggest date spot
+const { text } = await generateText({
+  model: MODEL,
+  prompt: `You are suggesting a first date venue for two people on a dating app...`,
+  maxOutputTokens: 80,
+});
+```
+
+**Token Budgets**:
+- Time proposal: 30 tokens
+- Response analysis: 160 tokens
+- Venue suggestion: 80 tokens
+
+**Why Mistral Medium?**
+- Superior natural language understanding for ambiguous responses
+- Better at conversational context resolution
+- Strong reasoning for multi-turn scheduling negotiations
+
+### Driver's License Extraction
+
+**Model**: `openai/gpt-4o-mini`
+
+**Purpose**: Extract structured data from driver's license images using vision capabilities.
+
+```typescript src/lib/dlExtract.ts
+const MODEL = "openai/gpt-4o-mini";
+
+const { text } = await generateText({
+  model: MODEL,
+  messages: [
+    {
+      role: "system",
+      content: `You extract structured data from US driver's license images...`,
+    },
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "Extract the full legal name in FIRST [MIDDLE] LAST order, plus date of birth and height from this driver's license.",
+        },
+        {
+          type: "image",
+          image: `data:image/jpeg;base64,${imageBase64}`,
+        },
+      ],
+    },
+  ],
+  maxOutputTokens: 200,
+});
+```
+
+**Token Budget**: 200 output tokens
+
+**Why GPT-4o-mini?**
+- Native vision support for image analysis
+- Reliable OCR performance on ID documents
+- Fast enough for real-time onboarding
+
+### Photo AI Tags
+
+**Model**: `openai/gpt-4o-mini`
+
+**Purpose**: Extract appearance and style tags from user photos.
+
+```typescript src/lib/tpoPhotoTags.ts
+const MODEL = "openai/gpt-4o-mini";
+
+const { text } = await generateText({
+  model: MODEL,
+  messages: [
+    {
+      role: "system",
+      content: `Analyze this dating profile photo...`,
+    },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Analyze this photo" },
+        { type: "image", image: `data:image/jpeg;base64,${imageBase64}` },
+      ],
+    },
+  ],
+  maxOutputTokens: 150,
+});
+```
+
+**Token Budget**: 150 output tokens
+
+### Onboarding Answer Quality
+
+**Model**: `openai/gpt-4o-mini`
+
+**Purpose**: Evaluate if user answers are comprehensive or need follow-up questions.
+
+```typescript src/lib/tpoAnswerQuality.ts
+const MODEL = "openai/gpt-4o-mini";
+
+const { text } = await generateText({
+  model: MODEL,
+  prompt: `Evaluate this onboarding answer...`,
+  maxOutputTokens: 100,
+});
+```
+
+**Token Budget**: 100 output tokens
+
+### Onboarding Adlibs
+
+**Model**: `openai/gpt-4o-mini`
+
+**Purpose**: Generate personalized transition messages between onboarding questions.
+
+```typescript src/lib/tpoOnboardingAdlib.ts
+const MODEL = "openai/gpt-4o-mini";
+
+const { text } = await generateText({
+  model: MODEL,
+  prompt: `Generate a brief, natural acknowledgment of the user's answer...`,
+  maxOutputTokens: 30,
+});
+```
+
+**Token Budget**: 30 output tokens
+
+## Fallback Behavior
+
+All AI features gracefully degrade when the API key is missing:
+
+```typescript
+if (!process.env.AI_GATEWAY_API_KEY) {
+  // Return safe defaults instead of failing
+  return EMPTY_PROFILE; // profile structuring
+  return fallback;       // scheduling proposals
+  return [];             // photo tags
+}
+```
+
+<Accordion title="Fallback Examples">
+```typescript
+// Profile structuring → empty schema
+if (!process.env.AI_GATEWAY_API_KEY) {
+  return {
+    about: { /* all null/empty */ },
+    preferences: { /* all null/empty */ }
+  };
+}
+
+// Scheduling time proposal → default suggestion
+if (!process.env.AI_GATEWAY_API_KEY) {
+  return formatDateFriendly(addDays(today, 3)) + " at 7pm";
+}
+
+// Scheduling analysis → assume accepted
+if (!process.env.AI_GATEWAY_API_KEY) {
+  return {
+    accepted: true,
+    proposedAlternative: null,
+    tooSoon: false,
+    needsClarification: false,
+    clarificationQuestion: null,
+  };
+}
+
+// Photo tags → empty array
+if (!process.env.AI_GATEWAY_API_KEY) {
+  return [];
+}
+```
+</Accordion>
+
+## Error Handling
+
+All AI calls are wrapped in try/catch with appropriate fallbacks:
+
+```typescript
+try {
+  const { text } = await generateText({ /* ... */ });
+  return parseResponse(text);
+} catch (error) {
+  console.error("[ai] Model call failed:", error);
+  return SAFE_FALLBACK;
+}
+```
+
+Errors don't crash the application - they fall back to conservative defaults that allow the user flow to continue.
+
+## Timeout Handling
+
+Some AI calls use explicit timeouts to prevent blocking:
+
+```typescript src/app/api/tpo/webhook/route.ts
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number
+): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+  });
+}
+
+// Usage: timeout after 20 seconds
+const dlData = await withTimeout(
+  extractDriversLicenseData(imageBase64),
+  20000
+);
+
+if (dlData) {
+  // Use extracted data
+} else {
+  console.warn("DL extraction timed out (non-blocking)");
+}
+```
+
+## Token Budget Summary
+
+| Feature | Model | Output Tokens | Input Type |
+|---------|-------|---------------|------------|
+| Profile Structuring | GPT-4o-mini | 700 | Text |
+| Time Proposal | Mistral Medium | 30 | Text |
+| Response Analysis | Mistral Medium | 160 | Text |
+| Venue Suggestion | Mistral Medium | 80 | Text |
+| DL Extraction | GPT-4o-mini | 200 | Vision |
+| Photo Tags | GPT-4o-mini | 150 | Vision |
+| Answer Quality | GPT-4o-mini | 100 | Text |
+| Onboarding Adlib | GPT-4o-mini | 30 | Text |
+
+## Cost Optimization
+
+### Token Limits
+
+All prompts specify `maxOutputTokens` to prevent runaway generation:
+
+```typescript
+const { text } = await generateText({
+  model: MODEL,
+  prompt: "...",
+  maxOutputTokens: 700, // Hard limit
+});
+```
+
+### Model Selection
+
+Using GPT-4o-mini instead of GPT-4 for structured tasks reduces costs by ~90% while maintaining quality for well-defined extraction tasks.
+
+### Conditional Execution
+
+Some features only run AI when needed:
+
+```typescript src/app/api/tpo/webhook/route.ts
+const answerWordCount = answer.trim().split(/\s+/).filter(Boolean).length;
+const shouldAttemptAdlib =
+  answerWordCount >= 4 &&  // Only for substantial answers
+  !!previousQuestionId &&
+  ADLIB_ENABLED_QUESTION_IDS.has(previousQuestionId);
+
+const adlib = shouldAttemptAdlib
+  ? await getOnboardingAdlib({ /* ... */ })
+  : null;
+```
+
+Adlibs are skipped for short answers to save on API calls.
+
+## Response Parsing
+
+All JSON responses handle markdown code fences:
+
+```typescript
+function stripMarkdownCodeFence(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("```")) return trimmed;
+
+  const lines = trimmed.split("\n");
+  if (lines.length < 2) return trimmed;
+
+  const contentLines = lines.slice(1);
+  const lastLine = contentLines[contentLines.length - 1]?.trim();
+  if (lastLine === "```") {
+    contentLines.pop();
+  }
+  return contentLines.join("\n").trim();
+}
+
+// Then parse:
+const cleaned = stripMarkdownCodeFence(text);
+const parsed = JSON.parse(cleaned);
+```
+
+This handles both clean JSON and markdown-wrapped JSON responses.
+
+## Best Practices
+
+### 1. Always Specify Token Limits
+
+```typescript
+// Good
+const { text } = await generateText({
+  model: MODEL,
+  prompt: "...",
+  maxOutputTokens: 100,
+});
+
+// Bad - no limit
+const { text } = await generateText({
+  model: MODEL,
+  prompt: "...",
+});
+```
+
+### 2. Use Appropriate Models
+
+```typescript
+// Good - vision task uses GPT-4o-mini
+const tags = await generateText({
+  model: "openai/gpt-4o-mini",
+  messages: [{ type: "image", image: base64 }],
+});
+
+// Bad - Mistral doesn't support vision
+const tags = await generateText({
+  model: "mistral/mistral-medium",
+  messages: [{ type: "image", image: base64 }],
+});
+```
+
+### 3. Always Provide Fallbacks
+
+```typescript
+// Good
+try {
+  return await aiCall();
+} catch {
+  return SAFE_DEFAULT;
+}
+
+// Bad - crash on failure
+return await aiCall();
+```
+
+### 4. Log AI Failures
+
+```typescript
+try {
+  return await generateText({ /* ... */ });
+} catch (error) {
+  console.error("[feature] AI call failed:", error);
+  return fallback;
+}
+```
+
+Logging helps debug production issues without crashing the application.

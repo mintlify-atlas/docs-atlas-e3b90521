@@ -1,0 +1,239 @@
+---
+title: Reviewing User Applications
+description: How to approve, reject, and manage pending user applications
+---
+
+The Applications tab displays all users with status `PENDING_REVIEW` who have completed onboarding and are awaiting admin approval.
+
+## Application Review Workflow
+
+<Steps>
+  <Step title="Navigate to Applications tab">
+    Click the **Applications** tab to view pending reviews. The tab badge shows the count of pending applications.
+  </Step>
+  
+  <Step title="Review user profile">
+    Each card displays:
+    - Profile photos (clickable gallery)
+    - Name, age, height, city (from ID verification)
+    - Structured profile badges (about + preferences)
+    - Account creation date
+  </Step>
+  
+  <Step title="Inspect badges">
+    Review the extracted badges for quality and completeness:
+    - **About section**: gender, sexuality, work, hobbies, lifestyle preferences
+    - **Preference section**: age range, must-haves, dealbreakers, compatibility criteria
+  </Step>
+  
+  <Step title="Make decision">
+    Choose an action:
+    - **Approve**: User becomes `APPROVED` and available for pairing
+    - **Reject**: User becomes `REJECTED` and receives rejection SMS
+    - **Delete**: Permanently remove user record
+    - **Ban**: Set status to `BANNED`
+  </Step>
+</Steps>
+
+## Badge System
+
+The badge system automatically extracts structured data from conversational onboarding responses.
+
+### Badge Categories
+
+<Tabs>
+  <Tab title="About Badges">
+    Personal attributes extracted from "about me" responses:
+    
+    - **Identity**: gender, sexuality, relationship intent
+    - **Demographics**: age, height, city, work
+    - **Lifestyle**: drinking, smoking, sleep schedule, activity level
+    - **Social**: intro/extro, social energy, communication style
+    - **Values**: personal values, hobbies, boundaries
+    - **Photo AI tags**: Automatically detected attributes from photos
+  </Tab>
+  
+  <Tab title="Preference Badges">
+    Partner preferences extracted from preferences responses:
+    
+    - **Demographics**: age range, height range
+    - **Compatibility**: religion, politics, drinking/smoking preferences
+    - **Communication**: texting frequency, reply speed, planning style
+    - **Physical**: body type, style, grooming preferences
+    - **Must-haves & Dealbreakers**: Critical compatibility factors
+  </Tab>
+</Tabs>
+
+### Editing Badges
+
+You can refine badge accuracy directly in the Applications tab:
+
+<Steps>
+  <Step title="Hover over a badge">
+    Hover over any editable badge to reveal edit/delete controls
+  </Step>
+  
+  <Step title="Click pencil icon">
+    Opens edit modal with current badge value
+  </Step>
+  
+  <Step title="Update value">
+    Modify the text and click Save. The backend updates the structured profile field.
+  </Step>
+</Steps>
+
+<Warning>
+  Badge edits modify the `structuredProfile` JSON field. Some badges are read-only (e.g., ID parse status).
+</Warning>
+
+### Deleting Badges
+
+Click the trash icon on a badge to remove it from the user's profile. This is useful for:
+- Removing inaccurate AI extractions
+- Cleaning up duplicate information
+- Removing sensitive data that shouldn't be displayed
+
+## Badge Re-parsing
+
+If badges appear incorrect or incomplete, use the **refresh icon** to re-run the AI extraction:
+
+<Steps>
+  <Step title="Click refresh icon">
+    Located in the top-right of each user card
+  </Step>
+  
+  <Step title="AI re-processes responses">
+    The system re-analyzes the original `aboutMe` and `preferences` text
+  </Step>
+  
+  <Step title="Badges update">
+    The card refreshes with newly extracted badges
+  </Step>
+</Steps>
+
+<Note>
+  Re-parsing preserves photo AI tags but regenerates all other badges from the raw text responses.
+</Note>
+
+## Viewing Full Application Text
+
+To see the raw onboarding responses:
+
+1. Click the **eye icon** in the user card header
+2. View plaintext application modal showing:
+   - Phone number
+   - Name, age, height (from ID)
+   - City
+   - Full "about me" text
+   - Full "preferences" text
+
+This is useful for context when badges seem incomplete or when making borderline approval decisions.
+
+## Approval Actions
+
+### Approve User
+
+```typescript
+POST /api/tpo/admin/review
+{
+  "userId": "user_id",
+  "action": "approve"
+}
+```
+
+**Results:**
+- User status → `APPROVED`
+- SMS sent: "you've been accepted! we'll let you know when we have a match."
+- User becomes available in Pairing tab
+
+### Reject User
+
+```typescript
+POST /api/tpo/admin/review
+{
+  "userId": "user_id",
+  "action": "reject"
+}
+```
+
+**Results:**
+- User status → `REJECTED`
+- SMS sent: "thanks for applying. unfortunately we aren't able to accept you at this time."
+- User moved to Blocked users view
+
+<Warning>
+  Rejected users can re-apply by deleting their record (see Blocked tab). Use **Ban** for users who should never be allowed back.
+</Warning>
+
+### Ban User
+
+For users who violate guidelines:
+
+```typescript
+POST /api/tpo/admin/user-action
+{
+  "userId": "user_id",
+  "action": "ban"
+}
+```
+
+**Results:**
+- User status → `BANNED`
+- Any active dates are ended
+- User moved to Blocked users view
+
+### Delete User
+
+Permanently removes user record and all associated data:
+
+```typescript
+POST /api/tpo/admin/user-action
+{
+  "userId": "user_id",
+  "action": "delete"
+}
+```
+
+**Results:**
+- All messages deleted
+- All dates deleted
+- User record deleted
+- Phone number can sign up again fresh
+
+## Review Best Practices
+
+<AccordionGroup>
+  <Accordion title="Profile Photo Quality">
+    - At least one clear face photo
+    - At least one full-body photo
+    - Photos are recent and show the actual person
+    - No group photos where person is unclear
+  </Accordion>
+  
+  <Accordion title="Profile Completeness">
+    - About section shows genuine self-description
+    - Preferences are specific and actionable
+    - At least 5-10 badges extracted per section
+    - ID verification succeeded (check for "needs clearer id" badge)
+  </Accordion>
+  
+  <Accordion title="Red Flags">
+    - Extremely generic or copy-pasted responses
+    - Inappropriate content or requests
+    - Fake or celebrity photos
+    - ID verification failed
+    - Contradictory information in badges
+  </Accordion>
+</AccordionGroup>
+
+## Related Actions
+
+<CardGroup cols={2}>
+  <Card title="Create Pairings" href="/admin-guide/pairing" icon="users">
+    Learn how to match approved users
+  </Card>
+  
+  <Card title="Monitor Onboarding" href="/admin-guide/overview" icon="user-plus">
+    Help users complete the onboarding flow
+  </Card>
+</CardGroup>

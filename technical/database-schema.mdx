@@ -1,0 +1,678 @@
+---
+title: Database Schema
+description: Complete Prisma schema documentation with relationships and field descriptions
+---
+
+## Overview
+
+The jøsh database uses PostgreSQL via Prisma ORM. The schema is divided into two main domains:
+
+1. **Legacy Models** - Original jmash voting system (Photo, Vote, User, Shot)
+2. **TPO Models** - Time/Place/Occasion dating system (TpoUser, TpoDate, TpoMessage)
+
+## Schema Configuration
+
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+```
+
+## TPO (Dating) Models
+
+### TpoUser
+
+Represents users in the dating system with comprehensive onboarding state.
+
+<ParamField path="id" type="String" default="cuid()">
+  Unique identifier
+</ParamField>
+
+<ParamField path="createdAt" type="DateTime" default="now()">
+  User creation timestamp
+</ParamField>
+
+<ParamField path="updatedAt" type="DateTime">
+  Auto-updated on changes
+</ParamField>
+
+<ParamField path="phoneNumber" type="String" required>
+  E.164 format phone number (unique)
+</ParamField>
+
+<ParamField path="status" type="TpoUserStatus" default="ONBOARDING">
+  Current user state: `ONBOARDING`, `PENDING_REVIEW`, `APPROVED`, `REJECTED`, `BANNED`
+</ParamField>
+
+<ParamField path="onboardingStep" type="TpoOnboardingStep" default="INTRO_SENT">
+  Current onboarding progress:
+  - `INTRO_SENT`
+  - `AWAITING_ABOUT`
+  - `AWAITING_PREFERENCES`
+  - `AWAITING_CITY`
+  - `AWAITING_PHOTOS`
+  - `AWAITING_ID`
+  - `COMPLETE`
+</ParamField>
+
+<ParamField path="aboutMe" type="String?">
+  Free-form text about the user (Q&A format)
+</ParamField>
+
+<ParamField path="onboardingQuestionIndex" type="Int" default="0">
+  Current position in onboarding question sequence
+</ParamField>
+
+<ParamField path="aboutFollowupAsked" type="Boolean" default="false">
+  Whether AI requested clarification on current answer
+</ParamField>
+
+<ParamField path="aboutFollowupCount" type="Int" default="0">
+  Number of follow-up questions asked
+</ParamField>
+
+<ParamField path="preferences" type="String?">
+  User's dating preferences (merged with aboutMe)
+</ParamField>
+
+<ParamField path="preferencesFollowupAsked" type="Boolean" default="false">
+  Legacy field for preferences follow-up
+</ParamField>
+
+<ParamField path="preferencesFollowupCount" type="Int" default="0">
+  Legacy preferences follow-up counter
+</ParamField>
+
+<ParamField path="city" type="String?">
+  User's current city
+</ParamField>
+
+<ParamField path="structuredProfile" type="Json?">
+  AI-generated structured profile with about/preferences sections
+</ParamField>
+
+<ParamField path="photoUrls" type="String[]" default="[]">
+  Array of Supabase storage paths for user photos
+</ParamField>
+
+<ParamField path="idPhotoUrl" type="String?">
+  Storage path for driver's license photo
+</ParamField>
+
+<ParamField path="dlName" type="String?">
+  Name extracted from driver's license
+</ParamField>
+
+<ParamField path="dlAge" type="Int?">
+  Age calculated from driver's license DOB
+</ParamField>
+
+<ParamField path="dlHeight" type="String?">
+  Height from driver's license
+</ParamField>
+
+#### Relationships
+
+```prisma
+datesAsA  TpoDate[] @relation("DateUserA")
+datesAsB  TpoDate[] @relation("DateUserB")
+```
+
+#### Example
+
+```typescript
+const user = await db.tpoUser.create({
+  data: {
+    phoneNumber: "+12125551234",
+    status: "ONBOARDING",
+    onboardingStep: "AWAITING_ABOUT",
+    onboardingQuestionIndex: 0,
+  },
+});
+```
+
+---
+
+### TpoDate
+
+Represents a matched pair with scheduling state and message portal.
+
+<ParamField path="id" type="String" default="cuid()">
+  Unique date identifier
+</ParamField>
+
+<ParamField path="createdAt" type="DateTime" default="now()">
+  Date creation timestamp
+</ParamField>
+
+<ParamField path="status" type="TpoDateStatus" default="ACTIVE">
+  `ACTIVE` or `ENDED`
+</ParamField>
+
+<ParamField path="endedAt" type="DateTime?">
+  Timestamp when date was ended
+</ParamField>
+
+<ParamField path="portalEnabled" type="Boolean" default="false">
+  Whether direct messaging between users is enabled
+</ParamField>
+
+<ParamField path="schedulingPhase" type="TpoSchedulingPhase" default="PROPOSING_TO_A">
+  Current scheduling state:
+  - `PROPOSING_TO_A`
+  - `WAITING_FOR_A_REPLY`
+  - `PROPOSING_TO_B`
+  - `WAITING_FOR_B_REPLY`
+  - `WAITING_FOR_A_ALTERNATIVE`
+  - `WAITING_FOR_B_ALTERNATIVE`
+  - `AGREED`
+  - `FAILED`
+  - `ESCALATED`
+</ParamField>
+
+<ParamField path="schedulingAttemptCount" type="Int" default="0">
+  Number of scheduling attempts made
+</ParamField>
+
+<ParamField path="lastSchedulingMessageAt" type="DateTime?">
+  Last scheduling message timestamp
+</ParamField>
+
+<ParamField path="schedulingEscalatedAt" type="DateTime?">
+  When scheduling was escalated to manual intervention
+</ParamField>
+
+<ParamField path="schedulingFailedReason" type="String?">
+  Reason for scheduling failure
+</ParamField>
+
+<ParamField path="proposedSlot" type="String?">
+  Current proposed date/time (e.g., "Saturday, March 8th at 7pm")
+</ParamField>
+
+<ParamField path="userAAvailable" type="Boolean?">
+  User A's availability for proposed slot
+</ParamField>
+
+<ParamField path="userBAvailable" type="Boolean?">
+  User B's availability for proposed slot
+</ParamField>
+
+<ParamField path="agreedTime" type="String?">
+  Mutually agreed date/time
+</ParamField>
+
+<ParamField path="suggestedPlace" type="String?">
+  AI-suggested venue for the date
+</ParamField>
+
+#### Relationships
+
+```prisma
+userAId  String
+userA    TpoUser @relation("DateUserA", fields: [userAId], references: [id])
+
+userBId  String
+userB    TpoUser @relation("DateUserB", fields: [userBId], references: [id])
+
+messages TpoMessage[]
+```
+
+#### Example
+
+```typescript
+const date = await db.tpoDate.create({
+  data: {
+    userAId: "clx123...",
+    userBId: "clx456...",
+    status: "ACTIVE",
+    schedulingPhase: "WAITING_FOR_A_REPLY",
+    proposedSlot: "Friday, March 7th at 7pm",
+  },
+  include: {
+    userA: true,
+    userB: true,
+  },
+});
+```
+
+---
+
+### TpoMessage
+
+Stores all messages in the scheduling and relay flows.
+
+<ParamField path="id" type="String" default="cuid()">
+  Unique message identifier
+</ParamField>
+
+<ParamField path="createdAt" type="DateTime" default="now()">
+  Message timestamp
+</ParamField>
+
+<ParamField path="dateId" type="String" required>
+  Associated date record
+</ParamField>
+
+<ParamField path="fromPhone" type="String" required>
+  Sender phone number (or "system" for bot messages)
+</ParamField>
+
+<ParamField path="toPhone" type="String" required>
+  Recipient phone number (or "system" for incoming user messages)
+</ParamField>
+
+<ParamField path="body" type="String" required>
+  Message content
+</ParamField>
+
+<ParamField path="blocked" type="Boolean" default="false">
+  Whether message contained profanity/blocked content
+</ParamField>
+
+#### Relationships
+
+```prisma
+date  TpoDate @relation(fields: [dateId], references: [id])
+```
+
+#### Example
+
+```typescript
+const message = await db.tpoMessage.create({
+  data: {
+    dateId: "clx789...",
+    fromPhone: "system",
+    toPhone: "+12125551234",
+    body: "you've been matched!",
+    blocked: false,
+  },
+});
+```
+
+---
+
+## Legacy (Voting) Models
+
+### Photo
+
+Photos used in the original jmash voting system.
+
+<ParamField path="id" type="String" default="cuid()">
+  Unique photo identifier
+</ParamField>
+
+<ParamField path="createdAt" type="DateTime" default="now()">
+  Upload timestamp
+</ParamField>
+
+<ParamField path="person" type="Person" required>
+  `JOSH` or `JONATHAN`
+</ParamField>
+
+<ParamField path="views" type="Int" default="0">
+  Total view count
+</ParamField>
+
+<ParamField path="elo" type="Int" default="1500">
+  Overall ELO rating
+</ParamField>
+
+<ParamField path="menElo" type="Int" default="1500">
+  ELO rating from male voters
+</ParamField>
+
+<ParamField path="womenElo" type="Int" default="1500">
+  ELO rating from female voters
+</ParamField>
+
+#### Relationships
+
+```prisma
+photoTransform PhotoTransform?
+leftVotes      Vote[]  @relation("LeftPhoto")
+rightVotes     Vote[]  @relation("RightPhoto")
+label          PhotoLabel?
+ick            Ick[]
+```
+
+---
+
+### Vote
+
+Records user votes between two photos.
+
+<ParamField path="id" type="String" default="cuid()">
+  Unique vote identifier
+</ParamField>
+
+<ParamField path="userId" type="String" required>
+  Voter's user ID
+</ParamField>
+
+<ParamField path="person" type="Person" required>
+  Which person's photos were voted on
+</ParamField>
+
+<ParamField path="leftPhotoId" type="String" required>
+  Left photo in comparison
+</ParamField>
+
+<ParamField path="rightPhotoId" type="String" required>
+  Right photo in comparison
+</ParamField>
+
+<ParamField path="winnerSide" type="Side" required>
+  `LEFT` or `RIGHT`
+</ParamField>
+
+<ParamField path="timeTaken" type="Float" required>
+  Decision time in seconds
+</ParamField>
+
+#### Relationships
+
+```prisma
+user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+leftPhoto  Photo  @relation(name: "LeftPhoto", fields: [leftPhotoId], references: [id], onDelete: Cascade)
+rightPhoto Photo  @relation(name: "RightPhoto", fields: [rightPhotoId], references: [id], onDelete: Cascade)
+```
+
+---
+
+### User
+
+Voters in the jmash system.
+
+<ParamField path="id" type="String" default="cuid()">
+  Unique user identifier
+</ParamField>
+
+<ParamField path="name" type="String" default="Anonymous">
+  Display name
+</ParamField>
+
+<ParamField path="gender" type="Gender" default="OTHER">
+  `MALE`, `FEMALE`, or `OTHER`
+</ParamField>
+
+<ParamField path="onboarded" type="Boolean" default="false">
+  Whether user completed voting onboarding
+</ParamField>
+
+#### Relationships
+
+```prisma
+votes Vote[]
+```
+
+---
+
+### Shot
+
+Represents dating profile "shots" for featured users.
+
+<ParamField path="person" type="Person" required>
+  `JOSH` or `JONATHAN`
+</ParamField>
+
+<ParamField path="name" type="String" required>
+  Display name
+</ParamField>
+
+<ParamField path="socialHandle" type="String" required>
+  Social media handle
+</ParamField>
+
+<ParamField path="city" type="String" required>
+  Current city
+</ParamField>
+
+<ParamField path="pickupLine" type="String" required>
+  Opening line/bio
+</ParamField>
+
+<ParamField path="photoUrl" type="String" required>
+  Profile photo URL
+</ParamField>
+
+---
+
+## Utility Models
+
+### PhotoLabel
+
+AI-generated labels for photos.
+
+```prisma
+model PhotoLabel {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  photoId   String   @unique
+  photo     Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  labels    Json
+}
+```
+
+### Ick
+
+User reactions marking photos as "ick".
+
+```prisma
+model Ick {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  photoId   String
+  photo     Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  userId    String
+  
+  @@unique([photoId, userId])
+}
+```
+
+### PhotoTransform
+
+Crop/zoom metadata for photos.
+
+```prisma
+model PhotoTransform {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  photoId   String   @unique
+  photo     Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  x         Float
+  y         Float
+  scale     Float
+}
+```
+
+### BannedUser
+
+Blocked users by ID or IP.
+
+```prisma
+model BannedUser {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  userId    String   @default("")
+  ipAddress String   @default("")
+}
+```
+
+### MutualLike
+
+Test system for mutual matches.
+
+```prisma
+model MutualLike {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  from      String
+  to        String
+  fromName  String
+  toName    String
+}
+```
+
+### MutualTestUser
+
+Test users for mutual matching.
+
+```prisma
+model MutualTestUser {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  phoneNumber String   @unique
+}
+```
+
+---
+
+## Enums
+
+### TpoUserStatus
+
+```prisma
+enum TpoUserStatus {
+  ONBOARDING      // Currently completing intake
+  PENDING_REVIEW  // Awaiting admin approval
+  APPROVED        // Can be matched
+  REJECTED        // Denied entry
+  BANNED          // Blocked from platform
+}
+```
+
+### TpoOnboardingStep
+
+```prisma
+enum TpoOnboardingStep {
+  INTRO_SENT       // Welcome message sent
+  AWAITING_ABOUT   // Collecting profile info
+  AWAITING_PREFERENCES // Legacy step (now merged with ABOUT)
+  AWAITING_CITY    // Legacy step (now part of ABOUT)
+  AWAITING_PHOTOS  // Collecting 2+ photos
+  AWAITING_ID      // Collecting driver's license
+  COMPLETE         // Ready for review
+}
+```
+
+### TpoDateStatus
+
+```prisma
+enum TpoDateStatus {
+  ACTIVE  // Currently active
+  ENDED   // Terminated by admin or system
+}
+```
+
+### TpoSchedulingPhase
+
+```prisma
+enum TpoSchedulingPhase {
+  PROPOSING_TO_A           // Bot proposing initial time to User A
+  WAITING_FOR_A_REPLY      // Awaiting A's response to proposal
+  PROPOSING_TO_B           // Forwarding A's time to User B
+  WAITING_FOR_B_REPLY      // Awaiting B's response
+  WAITING_FOR_A_ALTERNATIVE // A declined, waiting for counter-proposal
+  WAITING_FOR_B_ALTERNATIVE // B declined, waiting for counter-proposal
+  AGREED                   // Both confirmed, portal enabled
+  FAILED                   // Could not reach agreement
+  ESCALATED                // Requires manual intervention
+}
+```
+
+### Gender
+
+```prisma
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+```
+
+### Side
+
+```prisma
+enum Side {
+  LEFT
+  RIGHT
+}
+```
+
+### Person
+
+```prisma
+enum Person {
+  JOSH
+  JONATHAN
+}
+```
+
+---
+
+## Common Queries
+
+### Get user with all dates
+
+```typescript
+const user = await db.tpoUser.findUnique({
+  where: { phoneNumber: "+12125551234" },
+  include: {
+    datesAsA: true,
+    datesAsB: true,
+  },
+});
+```
+
+### Find active date for user
+
+```typescript
+const activeDate = await db.tpoDate.findFirst({
+  where: {
+    status: "ACTIVE",
+    OR: [
+      { userA: { phoneNumber: senderPhone } },
+      { userB: { phoneNumber: senderPhone } },
+    ],
+  },
+  include: { userA: true, userB: true },
+});
+```
+
+### Get all pending review users
+
+```typescript
+const pendingUsers = await db.tpoUser.findMany({
+  where: { status: "PENDING_REVIEW" },
+  orderBy: { createdAt: "desc" },
+});
+```
+
+### Get date messages in order
+
+```typescript
+const messages = await db.tpoMessage.findMany({
+  where: { dateId: "clx789..." },
+  orderBy: { createdAt: "asc" },
+});
+```
+
+---
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/technical/architecture">
+    System design and technology stack
+  </Card>
+  <Card title="API Endpoints" icon="code" href="/technical/api-endpoints">
+    REST API reference for all endpoints
+  </Card>
+</CardGroup>

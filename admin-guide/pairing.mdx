@@ -1,0 +1,307 @@
+---
+title: Creating User Pairings
+description: How to match approved users and manage active dates
+---
+
+The Pairing tab allows admins to manually create matches between approved users and monitor active date conversations.
+
+## Creating a Match
+
+<Steps>
+  <Step title="Navigate to Pairing tab">
+    Click **Pairing** to view all `APPROVED` users available for matching
+  </Step>
+  
+  <Step title="Select two users">
+    Click the **select** button on two user cards. Selected cards show a white border and "selected" badge.
+  </Step>
+  
+  <Step title="Review compatibility">
+    Compare their structured badges:
+    - Check age preferences match actual ages
+    - Review must-haves vs. partner attributes
+    - Verify no dealbreaker conflicts
+    - Compare lifestyle compatibility (social energy, communication style)
+  </Step>
+  
+  <Step title="Click 'Pair Selected'">
+    The **Pair Selected** button appears when exactly 2 users are selected
+  </Step>
+</Steps>
+
+<Warning>
+  Users can only have one active date at a time. Already-paired users are filtered from the available users list.
+</Warning>
+
+## What Happens When Users Are Paired
+
+The pairing process automatically initiates the date scheduling flow:
+
+```typescript
+POST /api/tpo/admin/pair
+{
+  "userAId": "user_a_id",
+  "userBId": "user_b_id"
+}
+```
+
+**Automated Actions:**
+
+1. **Date record created** with status `ACTIVE`
+2. **User A receives SMS**: "you've been matched!"
+3. **Scheduling begins**: System proposes initial time slot to User A
+4. **User B waits**: Not notified until User A confirms a time
+
+### Scheduling Phase
+
+The date enters scheduling coordination:
+
+```
+User A receives: "let's get the date on the calendar. 
+how does [proposed_time] work for you?"
+```
+
+User A's response triggers the scheduling negotiation flow. See the scheduling documentation for details on the full coordination process.
+
+## Managing Available Users
+
+The available users section shows approved users not currently in an active date.
+
+### User Card Information
+
+Each card displays:
+- **Photo gallery**: Navigate through profile and ID photos
+- **Name and age**: From ID verification (`dlName`, `dlAge`)
+- **Badges**: Structured profile attributes
+- **Select button**: Choose for pairing
+- **Eye icon**: View full plaintext application
+- **Refresh icon**: Re-parse badges from original responses
+
+### User Actions
+
+<Tabs>
+  <Tab title="View Application">
+    Click the eye icon to see:
+    - Phone number
+    - Full about me text
+    - Full preferences text
+    - Demographic info
+    
+    Useful for deeper context when evaluating compatibility.
+  </Tab>
+  
+  <Tab title="Re-parse Badges">
+    Click the refresh icon (spinning arrows) to re-run AI badge extraction.
+    
+    Use when:
+    - Badges seem incomplete
+    - Manual edits were made and you want to reset
+    - New profile structuring logic is deployed
+  </Tab>
+  
+  <Tab title="Delete User">
+    Permanently remove user from system.
+    
+    **Consequences:**
+    - All dates deleted
+    - All messages deleted
+    - User record deleted
+    - Phone can re-register
+  </Tab>
+  
+  <Tab title="Ban User">
+    Set status to `BANNED`.
+    
+    **Consequences:**
+    - Active dates ended
+    - Moved to Blocked tab
+    - Cannot be paired again without status change
+  </Tab>
+</Tabs>
+
+## Active Dates Section
+
+Below the available users, active date pairs are displayed:
+
+### Date Card Information
+
+- **User photos**: Overlapping circular avatars
+- **Names**: "Alice & Bob"
+- **Message count**: Total messages exchanged
+- **Creation date**: When the pair was created
+- **Eye icon**: View full conversation
+- **End button**: Terminate the date
+
+### Viewing Conversations
+
+Click the eye icon on a date card to open the conversation modal:
+
+<Steps>
+  <Step title="Conversation modal opens">
+    Displays dual phone panel view with both users' messages
+  </Step>
+  
+  <Step title="User A panel (left)">
+    Shows messages from User A's perspective:
+    - User messages appear as blue bubbles
+    - System/partner messages appear as gray bubbles
+  </Step>
+  
+  <Step title="User B panel (right)">
+    Shows messages from User B's perspective
+  </Step>
+</Steps>
+
+This dual-panel view makes it easy to:
+- Verify scheduling coordination is progressing
+- Monitor conversation quality
+- Identify technical issues or blocked messages
+- Check if intervention is needed
+
+### Ending a Date
+
+Click the **end** button to terminate an active date:
+
+```typescript
+POST /api/tpo/admin/end-date
+{
+  "dateId": "date_id"
+}
+```
+
+**Results:**
+- Date status → `ENDED`
+- `endedAt` timestamp set
+- Both users return to available pool
+- No automatic notification sent
+
+<Note>
+  Users can still see their date history, but the conversation portal will be disabled.
+</Note>
+
+## Badge Editing for Paired Users
+
+You can edit badges for approved users even while they're in the available pool:
+
+1. **Hover over badge** → Edit/delete icons appear
+2. **Click pencil** → Edit modal opens
+3. **Modify value** → Saves to `structuredProfile`
+4. **Click trash** → Deletes badge field/value
+
+Badge edits immediately update the database. Useful for:
+- Correcting AI extraction errors before pairing
+- Removing sensitive information
+- Updating outdated preferences
+
+## Pairing Best Practices
+
+<AccordionGroup>
+  <Accordion title="Age Compatibility">
+    Check that each user falls within the other's stated age range preference.
+    
+    **Example:**
+    - User A: 28 years old, wants 25-32
+    - User B: 30 years old, wants 27-35
+    ✅ Compatible
+  </Accordion>
+  
+  <Accordion title="Dealbreaker Review">
+    Scan both users' dealbreaker badges and verify no conflicts:
+    
+    - Smoking preferences
+    - Political/religious compatibility requirements
+    - Kids/no kids preferences
+    - Lifestyle incompatibilities
+  </Accordion>
+  
+  <Accordion title="Must-Have Alignment">
+    Verify each user has traits the other considers "must-haves":
+    
+    - Physical preferences (height, body type)
+    - Personality traits
+    - Communication styles
+    - Social energy levels
+  </Accordion>
+  
+  <Accordion title="Geographic Proximity">
+    Check city/location badges. Users should be within reasonable distance for in-person dates.
+  </Accordion>
+  
+  <Accordion title="Conversation Style Match">
+    Compare communication badges:
+    - Texting frequency preferences
+    - Reply speed expectations
+    - Directness/communication style
+    
+    Mismatches here can cause friction during scheduling and messaging.
+  </Accordion>
+</AccordionGroup>
+
+## API Reference
+
+### Create Pair
+
+```typescript
+POST /api/tpo/admin/pair
+Headers: { 'x-internal-api-key': string }
+Body: {
+  userAId: string
+  userBId: string
+}
+
+Response: {
+  success: true,
+  dateId: string
+}
+```
+
+**Validations:**
+- Both users must exist
+- Both must have status `APPROVED`
+- Neither can have an existing `ACTIVE` date
+- Users cannot be paired with themselves
+
+### Fetch Active Dates
+
+```typescript
+GET /api/tpo/admin/dates?status=ACTIVE
+Headers: { 'x-internal-api-key': string }
+
+Response: {
+  dates: [
+    {
+      id: string
+      status: string
+      createdAt: string
+      userA: { id, phoneNumber, aboutMe, photoUrls, city, dlName, dlAge, dlHeight }
+      userB: { id, phoneNumber, aboutMe, photoUrls, city, dlName, dlAge, dlHeight }
+      _count: { messages: number }
+    }
+  ]
+}
+```
+
+### Fetch Available Users
+
+```typescript
+GET /api/tpo/admin/users?status=APPROVED
+Headers: { 'x-internal-api-key': string }
+
+Response: {
+  users: TpoUser[]
+}
+```
+
+Filter out users already in active dates client-side.
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Monitor Dates" href="/admin-guide/monitoring" icon="messages">
+    Track conversations and identify issues
+  </Card>
+  
+  <Card title="Review Applications" href="/admin-guide/user-review" icon="clipboard-check">
+    Approve users before pairing
+  </Card>
+</CardGroup>

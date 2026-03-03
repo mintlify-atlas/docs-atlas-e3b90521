@@ -1,0 +1,210 @@
+---
+title: Date coordination
+description: Automated scheduling via SMS
+icon: calendar-check
+---
+
+After you're matched, jøsh automatically coordinates a date time and venue through SMS. The system negotiates with both people to find a mutually convenient time, then suggests a venue based on your profiles.
+
+## How scheduling works
+
+The scheduling system operates through a state machine with multiple phases:
+
+<Steps>
+  <Step title="Initial proposal">
+    The system sends the first person (User A) a date/time suggestion:
+    
+    ```
+    How about Saturday, March 8th at 7pm?
+    ```
+    
+    The AI generates a proposal at least 2 days in the future, typically a weekend evening or weekday after-work time.
+  </Step>
+  
+  <Step title="User A responds">
+    User A can:
+    - **Accept**: "yes", "works for me", "sounds good", etc.
+    - **Propose alternative**: "how about Friday at 6pm instead?"
+    - **Need clarification**: Vague response triggers a follow-up question
+    
+    The AI analyzes the response to determine intent.
+  </Step>
+  
+  <Step title="Proposal to User B">
+    If User A accepts, the system asks User B about the same time.
+    
+    If User A proposes an alternative, the system validates it (must be 2+ days away) and asks User B about the new time.
+    
+    <Warning>
+    If the proposed date is too soon (less than 2 days), User A receives: "that's a bit soon! how about something at least 2 days out?"
+    </Warning>
+  </Step>
+  
+  <Step title="User B responds">
+    Same options as User A:
+    - Accept → move to confirmation
+    - Propose alternative → ask User A about new time
+    - Need clarification → follow-up question
+  </Step>
+  
+  <Step title="Agreement reached">
+    Once both people accept the same time, you both receive:
+    
+    ```
+    great - you're both confirmed. here's your suggested date:
+    
+    [Venue Name] in [Neighborhood], [City] — [reason it fits you both]
+    ```
+    
+    Example:
+    ```
+    great - you're both confirmed. here's your suggested date:
+    
+    Cafe Maud in East Village, New York — cozy but lively, great for a first date conversation.
+    ```
+  </Step>
+</Steps>
+
+## Scheduling phases
+
+The system tracks scheduling state in the database:
+
+| Phase | Description |
+|-------|-------------|
+| `PROPOSING_TO_A` | Sending initial time proposal to User A |
+| `WAITING_FOR_A_REPLY` | Waiting for User A to respond |
+| `PROPOSING_TO_B` | Sending time proposal to User B |
+| `WAITING_FOR_B_REPLY` | Waiting for User B to respond |
+| `WAITING_FOR_A_ALTERNATIVE` | User B proposed new time, waiting for A's response |
+| `WAITING_FOR_B_ALTERNATIVE` | User A proposed new time, waiting for B's response |
+| `AGREED` | Both accepted the same time |
+| `FAILED` | Scheduling attempts exhausted without agreement |
+| `ESCALATED` | Flagged for manual intervention |
+
+See [Scheduling System](/technical/scheduling-system) for implementation details.
+
+## AI response analysis
+
+When you respond to a scheduling message, AI analyzes your text to determine:
+
+1. **Accepted**: Clear agreement with proposed time
+   - Signal words: "yes", "works for me", "sounds good", "perfect"
+   - Must not mention any alternative times
+
+2. **Alternative proposed**: Suggesting a different time
+   - Signal phrases: "how about", "what about", "can we do", "instead"
+   - Resolves relative dates like "tomorrow", "next Friday", "in 6 days"
+   - Validates that proposed date is at least 2 days away
+
+3. **Needs clarification**: Ambiguous response
+   - Can't tell if accepting or proposing something else
+   - Triggers follow-up: "just to confirm — does that time work for you?"
+
+<Accordion title="Example conversation">
+**System**: How about Saturday, March 8th at 7pm?
+
+**User A**: Actually Friday works better for me
+
+**System** (to User A): thanks - checking with your match now. i will confirm shortly.
+
+**System** (to User B): How about Friday, March 7th at 7pm?
+
+**User B**: 8pm would be better
+
+**System** (to User B): thanks - checking with your match now. i will confirm shortly.
+
+**System** (to User A): How about Friday, March 7th at 8pm?
+
+**User A**: perfect
+
+**System** (to User B): great - you're both confirmed. here's your suggested date: ...
+</Accordion>
+
+## Venue suggestions
+
+Once you agree on a time, the AI suggests a venue based on:
+
+- **Location**: Your city from onboarding
+- **Profiles**: Hobbies, drinking preferences, vibe, activity level
+- **Date time**: Appropriate for the day/time (brunch spot for Sunday morning, bar for Friday night)
+
+**Venue format**:
+```
+[Real venue name] in [Neighborhood], [City] — [why it fits]
+```
+
+The AI attempts to suggest real, specific establishments rather than generic descriptions. If it can't find a good fit, it falls back to:
+
+```
+Cafe Maud in East Village, New York — cozy but lively, great for a first date conversation.
+```
+
+See [Scheduling System](/technical/scheduling-system) for venue generation details.
+
+## Scheduling limits
+
+- **Minimum lead time**: 2 days (proposals less than 2 days out are rejected)
+- **Attempt count**: System tracks attempts and may escalate after many failed negotiations
+- **Actor validation**: Ensures responses come from the person being asked (prevents race conditions)
+
+<Note>
+While scheduling is happening, you can still send free-form messages to your match. Scheduling messages are clearly system-generated, while your personal messages appear as normal texts.
+</Note>
+
+## What if scheduling fails
+
+If scheduling doesn't work out after multiple attempts:
+
+1. **Escalation**: Admin is notified to potentially intervene
+2. **Manual coordination**: Matchmaker may reach out to help coordinate
+3. **Match end**: In extreme cases, the match may be ended
+
+<Warning>
+Be responsive and flexible during scheduling! The faster you respond and the more flexible you are, the easier it is to find a time.
+</Warning>
+
+## Messaging during scheduling
+
+You can message your match freely while scheduling is happening. The system distinguishes between:
+
+- **Scheduling messages**: System-generated time proposals and confirmations
+- **Personal messages**: Your free-form texts to your match
+
+Only messages in the scheduling conversation thread are analyzed by the AI for scheduling intent.
+
+## After the date
+
+Once you've agreed on a date time and venue:
+
+1. **Confirmation sent**: Both receive the venue suggestion
+2. **Portal stays open**: Continue messaging until the match ends
+3. **Show up**: Meet at the suggested venue and time
+4. **Match lifecycle**: Admins may end the match after the date
+
+See [Monitoring](/admin-guide/monitoring) for how admins track date progress.
+
+## Tips for smooth scheduling
+
+- **Respond promptly**: Faster responses = faster scheduling
+- **Be clear**: "Yes" or "how about Friday at 6pm" rather than "maybe"
+- **Be flexible**: Offering alternatives speeds things up
+- **Use specific times**: "7pm" is better than "evening"
+- **Allow lead time**: Suggest times at least 2 days out
+
+<CardGroup cols={2}>
+  <Card title="How matching works" icon="heart" href="/user-guide/matching">
+    Back to matching overview
+  </Card>
+  
+  <Card title="Scheduling system" icon="gears" href="/technical/scheduling-system">
+    See technical implementation
+  </Card>
+  
+  <Card title="AI models" icon="robot" href="/technical/ai-models">
+    Learn about AI response analysis
+  </Card>
+  
+  <Card title="Admin monitoring" icon="chart-line" href="/admin-guide/monitoring">
+    How admins track scheduling
+  </Card>
+</CardGroup>
