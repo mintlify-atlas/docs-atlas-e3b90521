@@ -9,39 +9,55 @@ The scheduling system orchestrates the entire flow from initial time proposal to
 
 ## Scheduling Phases
 
-The system progresses through a state machine with 5 distinct phases:
+The system progresses through a state machine with 9 distinct phases:
 
 ```typescript
 type SchedulingPhase =
-  | "WAITING_FOR_A_REPLY"       // Initial proposal sent to User A
-  | "WAITING_FOR_A_ALTERNATIVE"  // A declined, needs to propose new time
-  | "WAITING_FOR_B_REPLY"       // Time forwarded to User B for approval
-  | "WAITING_FOR_B_ALTERNATIVE"  // B declined, needs to propose new time
-  | "AGREED";                   // Both confirmed, portal enabled
+  | "PROPOSING_TO_A"            // Generating and sending proposal to User A
+  | "WAITING_FOR_A_REPLY"       // Waiting for User A's response
+  | "PROPOSING_TO_B"            // Generating and sending proposal to User B
+  | "WAITING_FOR_B_REPLY"       // Waiting for User B's response
+  | "WAITING_FOR_A_ALTERNATIVE" // A declined, needs to propose new time
+  | "WAITING_FOR_B_ALTERNATIVE" // B declined, needs to propose new time
+  | "AGREED"                    // Both confirmed, portal enabled
+  | "FAILED"                    // Scheduling attempts exhausted
+  | "ESCALATED";                // Flagged for manual intervention
 ```
 
 ### Phase Transitions
 
 <Accordion title="Phase Flow Diagram">
 ```
+PROPOSING_TO_A
+  └─ Initial proposal sent → WAITING_FOR_A_REPLY
+
 WAITING_FOR_A_REPLY
-  ├─ A accepts → WAITING_FOR_B_REPLY
-  ├─ A proposes alternative → WAITING_FOR_B_REPLY (update proposedSlot)
+  ├─ A accepts → PROPOSING_TO_B (or WAITING_FOR_B_REPLY)
+  ├─ A proposes alternative → PROPOSING_TO_B (update proposedSlot)
   └─ A declines without alternative → WAITING_FOR_A_ALTERNATIVE
 
 WAITING_FOR_A_ALTERNATIVE
-  └─ A proposes time → WAITING_FOR_B_REPLY
+  └─ A proposes time → PROPOSING_TO_B
+
+PROPOSING_TO_B
+  └─ Proposal sent to B → WAITING_FOR_B_REPLY
 
 WAITING_FOR_B_REPLY
   ├─ B accepts → AGREED (generate venue, enable portal)
-  ├─ B proposes alternative → WAITING_FOR_A_REPLY (update proposedSlot)
-  └─ B declines without alternative → WAITING_FOR_A_ALTERNATIVE
+  ├─ B proposes alternative → PROPOSING_TO_A (update proposedSlot)
+  └─ B declines without alternative → WAITING_FOR_B_ALTERNATIVE
 
 WAITING_FOR_B_ALTERNATIVE
-  └─ B proposes time → WAITING_FOR_A_REPLY
+  └─ B proposes time → PROPOSING_TO_A
 
 AGREED
   └─ Terminal state: messaging portal active
+
+FAILED
+  └─ Terminal state: scheduling unsuccessful
+
+ESCALATED
+  └─ Terminal state: requires manual admin intervention
 ```
 </Accordion>
 
